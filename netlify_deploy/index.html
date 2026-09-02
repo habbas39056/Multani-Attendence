@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multani Traders - Attendance & Payroll Management</title>
+    <!-- Modern Typography & FontAwesome Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css?v=20260903_v2">
+    <!-- Supabase JS Client for Cloud Direct Netlify Deployment -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Clean Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-logo">
+                    <div class="brand-icon-box"><i class="fa-solid fa-fingerprint"></i></div>
+                    <div class="brand-info">
+                        <h2 id="brandCompanyName">Multani Traders</h2>
+                        <span class="brand-subtitle">Attendance & Payroll System</span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-item active" data-tab="dashboard">
+                    <i class="fa-solid fa-house"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#attendance" class="nav-item" data-tab="attendance">
+                    <i class="fa-solid fa-calendar-day"></i>
+                    <span>Daily Attendance</span>
+                </a>
+                <a href="#timesheet" class="nav-item" data-tab="timesheet">
+                    <i class="fa-solid fa-calendar-days"></i>
+                    <span>Monthly Timesheet</span>
+                </a>
+                <a href="#payroll" class="nav-item" data-tab="payroll">
+                    <i class="fa-solid fa-receipt"></i>
+                    <span>Payroll & Payslips</span>
+                </a>
+                <a href="#employees" class="nav-item" data-tab="employees">
+                    <i class="fa-solid fa-users"></i>
+                    <span>Staff Members</span>
+                </a>
+                <a href="#settings" class="nav-item" data-tab="settings">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>Settings & Machine</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="footer-sync-card">
+                    <div class="pulse-indicator online"></div>
+                    <div>
+                        <div class="sync-title">System Ready</div>
+                        <div class="sync-desc">Auto-calculates salary</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Action Header -->
+            <header class="top-bar">
+                <div class="header-left">
+                    <button class="mobile-toggle" id="sidebarToggle"><i class="fa-solid fa-bars"></i></button>
+                    <div>
+                        <h1 id="pageTitle">Dashboard</h1>
+                        <p id="pageSubtitle">Overview of today's attendance and monthly payroll</p>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <!-- 1-Click Upload File Button -->
+                    <button class="btn btn-secondary" id="topUploadBtn" title="Upload Attendance File (.xls / .csv)">
+                        <i class="fa-solid fa-file-import text-accent"></i>
+                        <span>Import Attendance File</span>
+                    </button>
+
+                    <!-- 1-Click Machine Sync Button -->
+                    <button class="btn btn-primary" id="topSyncBtn" title="Sync Fingerprint Device">
+                        <i class="fa-solid fa-rotate"></i>
+                        <span>Sync Machine</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- ================= TAB 1: DASHBOARD ================= -->
+            <section class="tab-pane active" id="pane-dashboard">
+                <!-- Top 4 Summary Cards -->
+                <div class="kpi-cards-grid">
+                    <div class="kpi-card glass glow-blue">
+                        <div class="kpi-icon"><i class="fa-solid fa-users"></i></div>
+                        <div class="kpi-info">
+                            <span class="label">Total Staff</span>
+                            <h2 id="dashTotalStaff">12</h2>
+                            <span class="hint">Active Employees</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass glow-green">
+                        <div class="kpi-icon"><i class="fa-solid fa-user-check"></i></div>
+                        <div class="kpi-info">
+                            <span class="label">Present Today</span>
+                            <h2 id="dashPresentToday">0</h2>
+                            <span class="hint text-success" id="dashPresentHint">On Duty</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass glow-amber">
+                        <div class="kpi-icon"><i class="fa-solid fa-clock"></i></div>
+                        <div class="kpi-info">
+                            <span class="label">Late Arrivals</span>
+                            <h2 id="dashLateToday">0</h2>
+                            <span class="hint text-warning">Arrived after shift time</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass glow-purple">
+                        <div class="kpi-icon"><i class="fa-solid fa-money-bill-wave"></i></div>
+                        <div class="kpi-info">
+                            <span class="label">Monthly Net Payroll</span>
+                            <h2 id="dashNetPayroll">PKR 0</h2>
+                            <span class="hint text-info" id="dashPayrollMonthLbl">Current Month</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Today's Attendance Table Card -->
+                <div class="content-card glass mt-4">
+                    <div class="card-header">
+                        <div class="header-title">
+                            <i class="fa-solid fa-list-check text-primary"></i>
+                            <h3>Attendance for Selected Date</h3>
+                        </div>
+                        <div class="header-actions">
+                            <input type="date" id="dashDatePicker" class="form-input">
+                            <button class="btn btn-sm btn-outline" id="dashRefreshBtn"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table class="simple-table" id="dashAttendanceTable">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Staff Name</th>
+                                        <th>Department</th>
+                                        <th>In Time</th>
+                                        <th>Out Time</th>
+                                        <th>Hours Worked</th>
+                                        <th>Late</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dashAttendanceBody">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB 2: DAILY ATTENDANCE ================= -->
+            <section class="tab-pane" id="pane-attendance">
+                <div class="page-header-row">
+                    <div>
+                        <h2>Daily Attendance Records</h2>
+                        <p>View daily check-in / check-out times, late minutes, work duration, or manually mark Present / Absent</p>
+                    </div>
+                    <div class="row-actions">
+                        <input type="date" id="dailyDateInput" class="form-input">
+                        <button class="btn btn-outline" id="dailyRecalcBtn"><i class="fa-solid fa-calculator"></i> Auto-Calculate</button>
+                        <button class="btn btn-primary" id="openManualAttBtn"><i class="fa-solid fa-user-check"></i> Mark Manual Attendance</button>
+                    </div>
+                </div>
+
+                <div class="content-card glass">
+                    <div class="card-header">
+                        <div class="search-input-box">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="attendanceSearch" placeholder="Search staff name or ID...">
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table class="simple-table" id="dailyTable">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Employee Name</th>
+                                        <th>Department</th>
+                                        <th>In Time</th>
+                                        <th>Out Time</th>
+                                        <th>Duration</th>
+                                        <th>Late (Mins)</th>
+                                        <th>Overtime</th>
+                                        <th>Status</th>
+                                        <th style="text-align:center;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dailyBody">
+                                    <!-- Dynamic records -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB 3: MONTHLY TIMESHEET ================= -->
+            <section class="tab-pane" id="pane-timesheet">
+                <div class="page-header-row">
+                    <div>
+                        <h2>Monthly Attendance Timesheet</h2>
+                        <p>Complete 31-day visual attendance sheet showing present, late, absent, and weekend days</p>
+                    </div>
+                    <div class="row-actions">
+                        <input type="month" id="timesheetMonthInput" class="form-input" value="2026-08">
+                        <button class="btn btn-primary" id="loadTimesheetBtn"><i class="fa-solid fa-filter"></i> View Month</button>
+                    </div>
+                </div>
+
+                <div class="content-card glass">
+                    <div class="card-body">
+                        <!-- Legend -->
+                        <div class="status-legend">
+                            <span class="legend-pill"><span class="badge badge-success">P</span> Present</span>
+                            <span class="legend-pill"><span class="badge badge-warning">L</span> Late</span>
+                            <span class="legend-pill"><span class="badge badge-info">HD</span> Half Day</span>
+                            <span class="legend-pill"><span class="badge badge-danger">A</span> Absent</span>
+                            <span class="legend-pill"><span class="badge badge-secondary">OFF</span> Weekend</span>
+                        </div>
+
+                        <div class="table-container matrix-scroll">
+                            <table class="matrix-table" id="timesheetMatrixTable">
+                                <thead id="timesheetMatrixHead"></thead>
+                                <tbody id="timesheetMatrixBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB 4: PAYROLL & PAYSLIPS ================= -->
+            <section class="tab-pane" id="pane-payroll">
+                <div class="page-header-row">
+                    <div>
+                        <h2>Monthly Payroll & Salary Computation</h2>
+                        <p>Automatic salary calculation with basic pay, allowances, overtime, absent deductions, and payslips</p>
+                    </div>
+                    <div class="row-actions">
+                        <input type="month" id="payrollMonthInput" class="form-input" value="2026-08">
+                        <button class="btn btn-primary" id="calculatePayrollBtn">
+                            <i class="fa-solid fa-calculator"></i> Calculate Month Payroll
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Payroll Summary Strip -->
+                <div class="payroll-kpi-bar glass">
+                    <div class="pkpi-item">
+                        <span class="lbl">Month</span>
+                        <h3 id="paySummaryMonth">August 2026</h3>
+                    </div>
+                    <div class="pkpi-item">
+                        <span class="lbl">Total Staff</span>
+                        <h3 id="paySummaryStaff">12</h3>
+                    </div>
+                    <div class="pkpi-item">
+                        <span class="lbl">Gross Salary</span>
+                        <h3 id="paySummaryGross">PKR 0</h3>
+                    </div>
+                    <div class="pkpi-item">
+                        <span class="lbl">Total Deductions</span>
+                        <h3 class="text-danger" id="paySummaryDeductions">PKR 0</h3>
+                    </div>
+                    <div class="pkpi-item highlight">
+                        <span class="lbl">Net Payable Salary</span>
+                        <h3 class="text-success" id="paySummaryNet">PKR 0</h3>
+                    </div>
+                </div>
+
+                <!-- Payslips Table -->
+                <div class="content-card glass mt-4">
+                    <div class="card-header">
+                        <div class="header-title">
+                            <i class="fa-solid fa-money-check-dollar text-primary"></i>
+                            <h3>Staff Salary Breakdown & Payslips</h3>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table class="simple-table" id="payrollTable">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Staff Name</th>
+                                        <th>Basic Salary</th>
+                                        <th>Allowances</th>
+                                        <th>OT Pay</th>
+                                        <th>Present / Absent</th>
+                                        <th>Deductions</th>
+                                        <th>Net Salary</th>
+                                        <th>Status</th>
+                                        <th>Print Payslip</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="payrollBody">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB 5: STAFF MEMBERS ================= -->
+            <section class="tab-pane" id="pane-employees">
+                <div class="page-header-row">
+                    <div>
+                        <h2>Staff Directory</h2>
+                        <p>Manage employee names, biometric machine IDs, and monthly salary packages</p>
+                    </div>
+                    <div class="row-actions">
+                        <button class="btn btn-primary" id="openAddStaffBtn">
+                            <i class="fa-solid fa-user-plus"></i> Add New Staff
+                        </button>
+                    </div>
+                </div>
+
+                <div class="content-card glass">
+                    <div class="card-header">
+                        <div class="search-input-box">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="staffSearch" placeholder="Search staff name or ID...">
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table class="simple-table" id="staffTable">
+                                <thead>
+                                    <tr>
+                                        <th>Bio ID</th>
+                                        <th>Staff Name</th>
+                                        <th>Department</th>
+                                        <th>Individual Schedule</th>
+                                        <th>Weekly Off</th>
+                                        <th>Basic Salary</th>
+                                        <th>Allowances</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="staffBody">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB 6: SETTINGS & MACHINE ================= -->
+            <section class="tab-pane" id="pane-settings">
+                <div class="page-header-row">
+                    <div>
+                        <h2>Company & Biometric Settings</h2>
+                        <p>Configure company details, currency, attendance rules, and fingerprint machine IP</p>
+                    </div>
+                    <div class="row-actions">
+                        <button class="btn btn-primary" id="saveAllSettingsBtn">
+                            <i class="fa-solid fa-floppy-disk"></i> Save Settings
+                        </button>
+                    </div>
+                </div>
+
+                <div class="settings-grid">
+                    <!-- Company Profile -->
+                    <div class="content-card glass">
+                        <div class="card-header">
+                            <div class="header-title"><i class="fa-solid fa-building text-primary"></i> <h3>Company Information</h3></div>
+                        </div>
+                        <div class="card-body form-grid">
+                            <div class="form-group span-2">
+                                <label>Company / Shop Name</label>
+                                <input type="text" id="setCompanyName" class="form-input" value="Multani Traders">
+                            </div>
+                            <div class="form-group">
+                                <label>Currency</label>
+                                <input type="text" id="setCurrency" class="form-input" value="PKR">
+                            </div>
+                            <div class="form-group">
+                                <label>Phone</label>
+                                <input type="text" id="setPhone" class="form-input" value="+92 300 1234567">
+                            </div>
+                            <div class="form-group span-2">
+                                <label>Address</label>
+                                <input type="text" id="setAddress" class="form-input" value="Multani Shop, Pakistan">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Biometric Machine Config -->
+                    <div class="content-card glass">
+                        <div class="card-header">
+                            <div class="header-title"><i class="fa-solid fa-fingerprint text-accent"></i> <h3>Fingerprint Machine Setup</h3></div>
+                        </div>
+                        <div class="card-body form-grid">
+                            <div class="form-group">
+                                <label>Machine IP Address</label>
+                                <input type="text" id="setDevIp" class="form-input" value="182.188.40.187">
+                            </div>
+                            <div class="form-group">
+                                <label>Port</label>
+                                <input type="number" id="setDevPort" class="form-input" value="8080">
+                            </div>
+                            <div class="form-group">
+                                <label>Device Login Username</label>
+                                <input type="text" id="setDevUser" class="form-input" value="admin">
+                            </div>
+                            <div class="form-group">
+                                <label>Device Login Password</label>
+                                <input type="password" id="setDevPass" class="form-input" value="Murtaza78653">
+                            </div>
+                            <div class="form-group span-2">
+                                <button type="button" class="btn btn-outline" id="testMachineBtn">
+                                    <i class="fa-solid fa-network-wired"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Shift & Working Hours Config -->
+                    <div class="content-card glass span-2">
+                        <div class="card-header">
+                            <div class="header-title"><i class="fa-solid fa-clock text-primary"></i> <h3>Global Shift Timings & Working Hours</h3></div>
+                        </div>
+                        <div class="card-body form-grid-3">
+                            <div class="form-group">
+                                <label>Default Shift Start Time</label>
+                                <input type="time" id="setShiftStart" class="form-input" value="09:00">
+                                <small class="hint">E.g. 09:00 AM, 10:00 AM</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Default Shift End Time</label>
+                                <input type="time" id="setShiftEnd" class="form-input" value="18:00">
+                                <small class="hint">E.g. 06:00 PM, 08:00 PM</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Default Daily Hours</label>
+                                <input type="number" step="0.5" id="setShiftHours" class="form-input" value="8.0">
+                                <small class="hint">Standard shift duration (e.g. 8 or 9 hrs)</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Late Grace Period (Minutes)</label>
+                                <input type="number" id="setLateGrace" class="form-input" value="15">
+                                <small class="hint">Buffer before marking late (e.g. 15 mins)</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Working Days / Month</label>
+                                <input type="number" id="setWorkingDays" class="form-input" value="26">
+                                <small class="hint">Used for Daily Rate = (Basic / Days)</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Overtime Multiplier</label>
+                                <input type="number" step="0.1" id="setOtMultiplier" class="form-input" value="1.5">
+                                <small class="hint">E.g. 1.5x of hourly salary</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Late Salary Penalty & Deduction Rules -->
+                    <div class="content-card glass span-2">
+                        <div class="card-header">
+                            <div class="header-title"><i class="fa-solid fa-percent text-warning"></i> <h3>Late Arrival Salary Deduction Rules (لیٹ آنے پر تنخواہ کٹوتی)</h3></div>
+                        </div>
+                        <div class="card-body form-grid-3">
+                            <div class="form-group">
+                                <label>Deduction Method</label>
+                                <select id="setLateDeductionType" class="form-input" onchange="toggleLateDeductionType(this.value)">
+                                    <option value="percentage" selected>Percentage (%) of 1 Day's Salary (e.g. 5%)</option>
+                                    <option value="fixed_amount">Fixed Amount (PKR) per Late Day (e.g. 100 PKR)</option>
+                                    <option value="threshold_days">Ratio Rule (e.g. 3 Lates = 1 Day Salary Cut)</option>
+                                    <option value="none">No Deduction (Warning / Record Only - 0 PKR)</option>
+                                </select>
+                                <small class="hint">How salary is cut when an employee comes late</small>
+                            </div>
+
+                            <!-- Input 1: Percentage of 1 Day Salary -->
+                            <div class="form-group" id="groupLatePercent">
+                                <label>Percentage (%) of 1 Day Salary per Late</label>
+                                <input type="number" step="0.5" id="setLatePenaltyPercent" class="form-input" value="5.0" oninput="updateLatePercentPreview()">
+                                <small class="hint" id="latePercentPreviewHint" style="color:var(--primary); font-weight:600;">
+                                    Example: On PKR 30,000 salary (1,000/day), 5% = PKR 50 cut per late day.
+                                </small>
+                            </div>
+
+                            <!-- Input 2: Fixed Amount (PKR) -->
+                            <div class="form-group" id="groupLateFixed" style="display:none;">
+                                <label>Fixed Amount (PKR) per Late Arrival</label>
+                                <input type="number" id="setLateFixedAmount" class="form-input" value="100">
+                                <small class="hint">Direct PKR amount cut per late mark (e.g. 100 PKR)</small>
+                            </div>
+
+                            <!-- Input 3: Threshold Ratio (3 lates = 1 day) -->
+                            <div class="form-group" id="groupLateThreshold" style="display:none;">
+                                <label>Late Days Threshold</label>
+                                <input type="number" id="setLateThreshold" class="form-input" value="3">
+                                <small class="hint">Late marks before 1 full day salary cut (e.g. 3)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ==================== MODALS ==================== -->
+
+    <!-- Modal 1: Printable Payslip Modal -->
+    <div class="modal-overlay" id="payslipModal">
+        <div class="modal-box modal-lg glass">
+            <div class="modal-header no-print">
+                <h3><i class="fa-solid fa-receipt text-success"></i> Official Payslip Preview</h3>
+                <div class="modal-header-actions">
+                    <button class="btn btn-primary" id="printSlipBtn"><i class="fa-solid fa-print"></i> Print Payslip</button>
+                    <button class="modal-close" onclick="closeModal('payslipModal')"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+            <div class="modal-body print-area" id="payslipArea">
+                <div class="payslip-paper">
+                    <!-- Header -->
+                    <div class="slip-top-header">
+                        <div class="slip-brand">
+                            <div class="slip-icon"><i class="fa-solid fa-fingerprint"></i></div>
+                            <div>
+                                <h2 id="slipCompany">MULTANI TRADERS</h2>
+                                <p id="slipCompanyAddress">Multani Shop, Pakistan</p>
+                            </div>
+                        </div>
+                        <div class="slip-right-tag">
+                            <span class="slip-badge">MONTHLY PAYSLIP</span>
+                            <h3 id="slipMonth">AUGUST 2026</h3>
+                            <div class="slip-ref" id="slipRef">Ref: PS-04-2026-08</div>
+                        </div>
+                    </div>
+
+                    <!-- Staff Details Strip -->
+                    <div class="slip-details-grid">
+                        <div><span>Staff ID:</span> <b id="slipBioId">04</b></div>
+                        <div><span>Employee Name:</span> <b id="slipName">Murtaza Italia</b></div>
+                        <div><span>Department:</span> <span id="slipDept">Multani Shop</span></div>
+                        <div><span>Designation:</span> <span id="slipPos">Staff</span></div>
+                        <div><span>Working Days:</span> <b id="slipDays">26 Days</b></div>
+                        <div><span>Payment Status:</span> <b class="text-success" id="slipStatus">Paid</b></div>
+                    </div>
+
+                    <!-- Attendance Summary -->
+                    <div class="slip-att-bar">
+                        <div><span>Present:</span> <b id="slipPres">24 Days</b></div>
+                        <div><span>Absent:</span> <b class="text-danger" id="slipAbs">2 Days</b></div>
+                        <div><span>Late Arrivals:</span> <b class="text-warning" id="slipLate">5 Days</b></div>
+                        <div><span>Overtime:</span> <b class="text-info" id="slipOt">0 Hours</b></div>
+                    </div>
+
+                    <!-- Earnings & Deductions Tables -->
+                    <div class="slip-cols-grid">
+                        <div class="slip-col">
+                            <h4 class="col-title text-success"><i class="fa-solid fa-circle-plus"></i> EARNINGS</h4>
+                            <table class="slip-inner-table">
+                                <tr><td>Basic Salary</td><td class="text-right" id="slipBasic">PKR 40,000.00</td></tr>
+                                <tr><td>House Rent Allowance</td><td class="text-right" id="slipHra">PKR 5,000.00</td></tr>
+                                <tr><td>Transport Allowance</td><td class="text-right" id="slipTransport">PKR 3,000.00</td></tr>
+                                <tr><td>Overtime Pay</td><td class="text-right" id="slipOtPay">PKR 0.00</td></tr>
+                                <tr><td>Bonus / Incentive</td><td class="text-right" id="slipBonus">PKR 0.00</td></tr>
+                                <tr class="total-row"><th>Gross Salary</th><th class="text-right" id="slipGross">PKR 48,000.00</th></tr>
+                            </table>
+                        </div>
+
+                        <div class="slip-col">
+                            <h4 class="col-title text-danger"><i class="fa-solid fa-circle-minus"></i> DEDUCTIONS</h4>
+                            <table class="slip-inner-table">
+                                <tr><td>Absent Days Deduction</td><td class="text-right text-danger" id="slipDedAbs">PKR 3,076.92</td></tr>
+                                <tr><td>Late Arrival Deduction</td><td class="text-right text-danger" id="slipDedLate">PKR 0.00</td></tr>
+                                <tr><td>Tax / Advance Deduction</td><td class="text-right text-danger" id="slipDedOther">PKR 0.00</td></tr>
+                                <tr><td style="opacity:0;">-</td><td style="opacity:0;">-</td></tr>
+                                <tr><td style="opacity:0;">-</td><td style="opacity:0;">-</td></tr>
+                                <tr class="total-row"><th>Total Deductions</th><th class="text-right text-danger" id="slipTotalDed">PKR 3,076.92</th></tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Net Salary Banner -->
+                    <div class="slip-net-box">
+                        <div>
+                            <span class="net-label">NET PAYABLE AMOUNT</span>
+                            <span class="net-words" id="slipWords">Forty-Four Thousand Nine Hundred Twenty-Three Only</span>
+                        </div>
+                        <div class="net-amount" id="slipNet">PKR 44,923.08</div>
+                    </div>
+
+                    <!-- Signatures -->
+                    <div class="slip-signatures">
+                        <div class="sig-item">
+                            <div class="sig-line"></div>
+                            <span>Employee Signature</span>
+                        </div>
+                        <div class="sig-item">
+                            <div class="sig-line"></div>
+                            <span>Authorized Signatory</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Comprehensive Staff Profile & Individual Schedule Modal -->
+    <div class="modal-overlay" id="staffModal">
+        <div class="modal-box modal-lg glass">
+            <div class="modal-header">
+                <h3 id="staffModalTitle"><i class="fa-solid fa-user-gear text-primary"></i> Staff Profile & Individual Schedule</h3>
+                <button class="modal-close" onclick="closeModal('staffModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="staffForm">
+                    <input type="hidden" id="staffIdHidden">
+
+                    <!-- Section 1: Staff Identification -->
+                    <div class="modal-section-title">
+                        <i class="fa-solid fa-id-card text-primary"></i>
+                        <span>1. Employee Information</span>
+                    </div>
+                    <div class="form-grid" style="margin-bottom: 20px;">
+                        <div class="form-group">
+                            <label>Biometric Machine ID <span class="text-danger">*</span></label>
+                            <input type="text" id="staffBioId" class="form-input" placeholder="e.g. 04, 11, 15" required>
+                            <small class="hint">Must match the ID on your fingerprint machine</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Staff Full Name <span class="text-danger">*</span></label>
+                            <input type="text" id="staffName" class="form-input" placeholder="e.g. Murtaza Italia" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Department / Location</label>
+                            <input type="text" id="staffDept" class="form-input" value="Multani Shop">
+                        </div>
+                        <div class="form-group">
+                            <label>Contact Phone Number</label>
+                            <input type="text" id="staffPhone" class="form-input" placeholder="+92 300 1234567">
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Individual Timings & Working Days -->
+                    <div class="modal-section-title">
+                        <i class="fa-solid fa-clock text-accent"></i>
+                        <span>2. Individual Shift Timings & Work Days (Custom Per Employee)</span>
+                    </div>
+                    <div class="form-grid-3" style="margin-bottom: 14px;">
+                        <div class="form-group">
+                            <label>Shift Start Time (Arrival)</label>
+                            <input type="time" id="staffStartTime" class="form-input" value="09:00" required>
+                            <small class="hint">Expected arrival time</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Shift End Time (Departure)</label>
+                            <input type="time" id="staffEndTime" class="form-input" value="18:00" required>
+                            <small class="hint">Expected leave time</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Daily Required Hours</label>
+                            <input type="number" step="0.5" id="staffWorkHours" class="form-input" value="8.0" required>
+                            <small class="hint">Standard shift hours (e.g. 8, 9, 10)</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Late Grace Period (Minutes)</label>
+                            <input type="number" id="staffGraceMins" class="form-input" value="15" required>
+                            <small class="hint">Buffer before marking late (mins)</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Weekly Off Day</label>
+                            <select id="staffWeeklyOff" class="form-input">
+                                <option value="Sun" selected>Sunday (Default)</option>
+                                <option value="Fri">Friday</option>
+                                <option value="Mon">Monday</option>
+                                <option value="Tue">Tuesday</option>
+                                <option value="Wed">Wednesday</option>
+                                <option value="Thu">Thursday</option>
+                                <option value="Sat">Saturday</option>
+                                <option value="None">None (7 Days)</option>
+                            </select>
+                            <small class="hint">Rest day for this employee</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Quick Preset / Template</label>
+                            <select id="staffPresetSelect" class="form-input" onchange="applyShiftPreset(this.value)">
+                                <option value="">-- Custom Individual --</option>
+                                <option value="morning">Morning (09:00 AM - 06:00 PM)</option>
+                                <option value="mid">Mid Day (10:30 AM - 08:30 PM)</option>
+                                <option value="evening">Evening (12:00 PM - 09:30 PM)</option>
+                                <option value="long">Full Day (09:00 AM - 09:00 PM [11 hrs])</option>
+                            </select>
+                            <small class="hint">Autofill times with 1 click</small>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Monthly Salary & Packages -->
+                    <div class="modal-section-title">
+                        <i class="fa-solid fa-money-bill-wave text-success"></i>
+                        <span>3. Salary & Allowance Package</span>
+                    </div>
+                    <div class="form-grid" style="margin-bottom: 14px;">
+                        <div class="form-group">
+                            <label>Basic Monthly Salary (PKR) <span class="text-danger">*</span></label>
+                            <input type="number" id="staffBasic" class="form-input" value="40000" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Monthly Allowances (HRA / Transport)</label>
+                            <input type="number" id="staffAllowances" class="form-input" value="8000">
+                        </div>
+                    </div>
+
+                    <div class="modal-buttons" style="margin-top: 24px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('staffModal')">Cancel</button>
+                        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save Staff Profile & Schedule</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 3: Manual Attendance Marker (حاضری اور غیر حاضری درج کریں) -->
+    <div class="modal-overlay" id="manualAttModal">
+        <div class="modal-box modal-md glass">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-user-check text-primary"></i> Mark / Edit Attendance (حاضری / غیر حاضری)</h3>
+                <button class="modal-close" onclick="closeModal('manualAttModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="manualAttForm">
+                    <input type="hidden" id="manualAttRecordId">
+
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label>Select Employee <span class="text-danger">*</span></label>
+                        <select id="manualAttEmpSelect" class="form-input" required>
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="form-grid" style="margin-bottom: 14px;">
+                        <div class="form-group">
+                            <label>Attendance Date <span class="text-danger">*</span></label>
+                            <input type="date" id="manualAttDate" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Status (حالت) <span class="text-danger">*</span></label>
+                            <select id="manualAttStatus" class="form-input" required onchange="handleManualStatusChange(this.value)">
+                                <option value="Present">Present (حاضر - Full Daily Pay)</option>
+                                <option value="Paid Leave">Paid Leave (تنخواہ والی رخصت - Full Daily Pay)</option>
+                                <option value="Unpaid Leave">Unpaid Leave (بغیر تنخواہ رخصت - 1 Day Salary Cut)</option>
+                                <option value="Absent">Absent (غیر حاضر - 1 Day Salary Cut)</option>
+                                <option value="Half Day">Half Day (نصف دن - 50% Pay)</option>
+                                <option value="Late">Late (لیٹ - Penalty Rule Applied)</option>
+                                <option value="Weekly Off">Weekly Off (ہفتہ وار چھٹی - Weekend)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-grid" id="manualAttTimesRow" style="margin-bottom: 14px;">
+                        <div class="form-group">
+                            <label>Check-In Time</label>
+                            <input type="time" id="manualAttIn" class="form-input" value="09:00">
+                        </div>
+                        <div class="form-group">
+                            <label>Check-Out Time</label>
+                            <input type="time" id="manualAttOut" class="form-input" value="18:00">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label>Remarks / Reason (وجہ / نوٹ)</label>
+                        <input type="text" id="manualAttNotes" class="form-input" placeholder="e.g. Approved leave, biometric machine miss, emergency">
+                    </div>
+
+                    <div class="modal-buttons" style="margin-top: 20px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('manualAttModal')">Cancel</button>
+                        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Save Attendance Record</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden File Input for .xls / .csv uploads -->
+    <input type="file" id="universalFileInput" accept=".xls,.xlsx,.csv,.txt" style="display:none">
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toastBox"></div>
+
+    <!-- App JavaScript -->
+    <script src="js/app.js?v=20260903_v2"></script>
+</body>
+</html>

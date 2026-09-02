@@ -1,0 +1,9 @@
+{
+  "name": "multani-traders-attendance",
+  "version": "1.0.0",
+  "description": "Multani Traders Attendance & Payroll Management System",
+  "main": "build.js",
+  "scripts": {
+    "build": "node build.js"
+  }
+}
