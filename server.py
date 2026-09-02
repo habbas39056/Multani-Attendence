@@ -830,9 +830,16 @@ def push_to_supabase():
     return supabase_manager.sync_local_to_supabase()
 
 # -------------------------------------------------------------
-# Static Frontend Serving
+# Static Frontend Serving (Supports Root css/, js/ and /static/)
 # -------------------------------------------------------------
 static_dir = os.path.join(os.path.dirname(__file__), "static")
+css_dir = os.path.join(static_dir, "css")
+js_dir = os.path.join(static_dir, "js")
+
+if os.path.exists(css_dir):
+    app.mount("/css", StaticFiles(directory=css_dir), name="css")
+if os.path.exists(js_dir):
+    app.mount("/js", StaticFiles(directory=js_dir), name="js")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
