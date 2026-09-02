@@ -22,6 +22,9 @@ targets.forEach(dir => {
     if (fs.existsSync('js/app.js')) {
         fs.copyFileSync('js/app.js', path.join(dir, 'js', 'app.js'));
     }
+    if (fs.existsSync('js/multani_core.js')) {
+        fs.copyFileSync('js/multani_core.js', path.join(dir, 'js', 'multani_core.js'));
+    }
 
     // Copy _redirects
     if (fs.existsSync('_redirects')) {
