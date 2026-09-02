@@ -1,26 +1,57 @@
 /**
  * MULTANI TRADERS - ATTENDANCE & PAYROLL APPLICATION
- * Clean, Simple, & User-Friendly Client Logic (Supports Local Server & Direct Supabase Cloud on Netlify)
+ * Universal Cloud & Local Architecture:
+ * - Direct Supabase PostgreSQL Cloud Integration (Netlify & Serverless)
+ * - Local FastAPI Backend Integration (Localhost Desktop App)
  */
 
 const SUPABASE_URL = 'https://tyxvrykwarevfdwrbrmv.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_rEHPrqKtGzTdIO6gVPXxOw_jE2Yy4VH';
-let supaClient = null;
-
-if (window.supabase) {
-    try {
-        supaClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    } catch (e) {
-        console.error('Supabase init error:', e);
-    }
-}
 
 const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 let currentTab = 'dashboard';
 let currentCurrency = 'PKR';
 let cachedStaff = [];
+let cachedCompanySettings = {
+    company_name: 'Multani Traders',
+    currency: 'PKR',
+    working_days_per_month: 26,
+    late_grace_minutes: 15,
+    late_deduction_type: 'percentage',
+    late_penalty_percent: 5.0,
+    late_fixed_amount: 100.0,
+    overtime_multiplier: 1.5,
+    address: 'Multani Traders, Pakistan'
+};
 
+// -------------------------------------------------------------
+// Universal Supabase REST Client
+// -------------------------------------------------------------
+async function querySupabase(endpoint, options = {}) {
+    const url = `${SUPABASE_URL}/rest/v1/${endpoint}`;
+    const headers = {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
+    };
+
+    const res = await fetch(url, { ...options, headers });
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Cloud DB Error (${res.status}): ${errText}`);
+    }
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+        return await res.json();
+    }
+    return null;
+}
+
+// -------------------------------------------------------------
+// Application Initialization
+// -------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
 });
@@ -35,9 +66,6 @@ async function initApp() {
     await loadStaff();
 }
 
-// -------------------------------------------------------------
-// Navigation & Tabs
-// -------------------------------------------------------------
 function setupNav() {
     document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
@@ -92,10 +120,8 @@ function switchTab(tabId) {
 }
 
 function setDefaultDates() {
-    const today = new Date().toISOString().split('T')[0];
-    const defaultMonth = '2026-08'; // Default to August where real records are imported
-
-    document.getElementById('dashDatePicker').value = today;
+    const defaultMonth = '2026-08';
+    document.getElementById('dashDatePicker').value = '2026-08-18';
     document.getElementById('dailyDateInput').value = '2026-08-18';
     document.getElementById('timesheetMonthInput').value = defaultMonth;
     document.getElementById('payrollMonthInput').value = defaultMonth;
@@ -105,30 +131,75 @@ function setDefaultDates() {
 // 1. Dashboard Module
 // -------------------------------------------------------------
 async function loadDashboard() {
-    const dateVal = document.getElementById('dashDatePicker').value;
+    const dateVal = document.getElementById('dashDatePicker').value || '2026-08-18';
     try {
-        const res = await fetch(`/api/dashboard/stats?target_date=${dateVal}`);
-        const data = await res.json();
+        let dailyRecords = [];
+        if (isLocalHost) {
+            try {
+                const res = await fetch(`/api/dashboard/stats?target_date=${dateVal}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('dashTotalStaff').textContent = data.total_employees;
+                    document.getElementById('dashPresentToday').textContent = data.status_counts.present;
+                    document.getElementById('dashLateToday').textContent = data.status_counts.late;
 
-        document.getElementById('dashTotalStaff').textContent = data.total_employees;
-        document.getElementById('dashPresentToday').textContent = data.status_counts.present;
-        document.getElementById('dashLateToday').textContent = data.status_counts.late;
+                    const payRes = await fetch('/api/payroll/runs');
+                    if (payRes.ok) {
+                        const runs = await payRes.json();
+                        if (runs && runs.length > 0) {
+                            document.getElementById('dashNetPayroll').textContent = formatCurrency(runs[0].total_net_salary);
+                            document.getElementById('dashPayrollMonthLbl').textContent = `Month: ${runs[0].month}`;
+                        }
+                    }
 
-        // Payroll teaser
-        const payRes = await fetch('/api/payroll/runs');
-        const runs = await payRes.json();
-        if (runs && runs.length > 0) {
-            document.getElementById('dashNetPayroll').textContent = formatCurrency(runs[0].total_net_salary);
-            document.getElementById('dashPayrollMonthLbl').textContent = `Month: ${runs[0].month}`;
+                    const dailyRes = await fetch(`/api/attendance/daily?date=${dateVal}`);
+                    if (dailyRes.ok) {
+                        const dailyData = await dailyRes.json();
+                        dailyRecords = dailyData.records || [];
+                    }
+                } else {
+                    dailyRecords = await fetchDashboardFromSupabase(dateVal);
+                }
+            } catch (err) {
+                dailyRecords = await fetchDashboardFromSupabase(dateVal);
+            }
+        } else {
+            dailyRecords = await fetchDashboardFromSupabase(dateVal);
         }
 
-        // Daily table
-        const dailyRes = await fetch(`/api/attendance/daily?date=${dateVal}`);
-        const dailyData = await dailyRes.json();
-        renderDashboardTable(dailyData.records || []);
+        renderDashboardTable(dailyRecords);
     } catch (e) {
-        console.error(e);
+        console.error('loadDashboard error:', e);
     }
+}
+
+async function fetchDashboardFromSupabase(dateVal) {
+    const emps = await querySupabase('employees?select=*&is_active=eq.1&order=id.asc');
+    cachedStaff = emps || [];
+    document.getElementById('dashTotalStaff').textContent = (emps || []).length;
+
+    const atts = await querySupabase(`daily_attendance?select=*,employees(name,biometric_id,department,designation)&date=eq.${dateVal}&order=employee_id.asc`);
+    const records = (atts || []).map(r => ({
+        ...r,
+        employee_name: r.employees ? r.employees.name : `Staff #${r.employee_id}`,
+        biometric_id: r.employees ? r.employees.biometric_id : r.employee_id,
+        department: r.employees ? r.employees.department : 'Multani Shop'
+    }));
+
+    const pres = records.filter(r => r.status && (r.status.includes('Present') || r.status === 'Late')).length;
+    const lates = records.filter(r => r.status === 'Late' || r.late_minutes > 0).length;
+
+    document.getElementById('dashPresentToday').textContent = pres;
+    document.getElementById('dashLateToday').textContent = lates;
+
+    const slips = await querySupabase('payslips?select=net_salary,month&month=eq.2026-08');
+    if (slips && slips.length > 0) {
+        const sumNet = slips.reduce((acc, s) => acc + (parseFloat(s.net_salary) || 0), 0);
+        document.getElementById('dashNetPayroll').textContent = formatCurrency(sumNet);
+        document.getElementById('dashPayrollMonthLbl').textContent = `Month: ${slips[0].month || '2026-08'}`;
+    }
+
+    return records;
 }
 
 function renderDashboardTable(records) {
@@ -145,7 +216,7 @@ function renderDashboardTable(records) {
             <td>${escapeHtml(r.department || 'Multani Shop')}</td>
             <td>${r.first_in ? `<b class="text-success">${r.first_in}</b>` : '<span class="text-muted">--:--</span>'}</td>
             <td>${r.last_out ? `<b class="text-info">${r.last_out}</b>` : '<span class="text-muted">--:--</span>'}</td>
-            <td><b>${r.total_hours} hrs</b></td>
+            <td><b>${r.total_hours || 0} hrs</b></td>
             <td>${r.late_minutes > 0 ? `<span class="badge badge-warning">${r.late_minutes}m Late</span>` : '<span class="text-muted">On time</span>'}</td>
             <td>${getStatusBadge(r.status)}</td>
         </tr>
@@ -156,28 +227,52 @@ function renderDashboardTable(records) {
 // 2. Daily Attendance Module
 // -------------------------------------------------------------
 async function loadDailyAttendance() {
-    const d = document.getElementById('dailyDateInput').value;
+    const d = document.getElementById('dailyDateInput').value || '2026-08-18';
     try {
-        const res = await fetch(`/api/attendance/daily?date=${d}`);
-        const data = await res.json();
-        renderDailyTable(data.records || []);
+        let records = [];
+        if (isLocalHost) {
+            try {
+                const res = await fetch(`/api/attendance/daily?date=${d}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    records = data.records || [];
+                } else {
+                    records = await fetchDailyFromSupabase(d);
+                }
+            } catch (err) {
+                records = await fetchDailyFromSupabase(d);
+            }
+        } else {
+            records = await fetchDailyFromSupabase(d);
+        }
+        renderDailyTable(records);
     } catch (e) {
-        console.error(e);
+        console.error('loadDailyAttendance error:', e);
     }
+}
+
+async function fetchDailyFromSupabase(d) {
+    const atts = await querySupabase(`daily_attendance?select=*,employees(name,biometric_id,department,designation)&date=eq.${d}&order=employee_id.asc`);
+    return (atts || []).map(r => ({
+        ...r,
+        employee_name: r.employees ? r.employees.name : `Staff #${r.employee_id}`,
+        biometric_id: r.employees ? r.employees.biometric_id : r.employee_id,
+        department: r.employees ? r.employees.department : 'Multani Shop'
+    }));
 }
 
 function renderDailyTable(records) {
     const tbody = document.getElementById('dailyBody');
     const query = (document.getElementById('attendanceSearch')?.value || '').toLowerCase();
 
-    const filtered = records.filter(r => 
+    const filtered = (records || []).filter(r => 
         (r.employee_name || '').toLowerCase().includes(query) ||
-        (r.biometric_id || '').includes(query) ||
+        (r.biometric_id || '').toString().includes(query) ||
         (r.department || '').toLowerCase().includes(query)
     );
 
     if (!filtered || filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted" style="padding:20px;">No records for this date.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted" style="padding:20px;">No records found for this date.</td></tr>`;
         return;
     }
 
@@ -188,7 +283,7 @@ function renderDailyTable(records) {
             <td>${escapeHtml(r.department || 'Multani Shop')}</td>
             <td>${r.first_in ? `<b class="text-success">${r.first_in}</b>` : '<span class="text-muted">--:--</span>'}</td>
             <td>${r.last_out ? `<b class="text-info">${r.last_out}</b>` : '<span class="text-muted">--:--</span>'}</td>
-            <td><b>${r.total_hours} hrs</b></td>
+            <td><b>${r.total_hours || 0} hrs</b></td>
             <td>${r.late_minutes > 0 ? `<span class="badge badge-warning">${r.late_minutes} mins</span>` : '<span class="text-muted">0</span>'}</td>
             <td>${r.overtime_hours > 0 ? `<span class="badge badge-info">+${r.overtime_hours}h</span>` : '<span class="text-muted">0h</span>'}</td>
             <td>${getStatusBadge(r.status)}</td>
@@ -205,20 +300,17 @@ function renderDailyTable(records) {
 async function populateManualAttendanceEmployees() {
     const sel = document.getElementById('manualAttEmpSelect');
     if (!sel) return;
-    try {
-        const res = await fetch('/api/employees');
-        const emps = await res.json();
-        sel.innerHTML = emps.map(e => `
-            <option value="${e.id}">[ID ${e.biometric_id}] ${escapeHtml(e.name)} - ${escapeHtml(e.department || 'Multani Shop')}</option>
-        `).join('');
-    } catch (e) {
-        console.error(e);
+    if (!cachedStaff || cachedStaff.length === 0) {
+        await loadStaff();
     }
+    sel.innerHTML = (cachedStaff || []).map(e => `
+        <option value="${e.id}">[ID ${e.biometric_id}] ${escapeHtml(e.name)} - ${escapeHtml(e.department || 'Multani Shop')}</option>
+    `).join('');
 }
 
 async function openManualAttendanceModal() {
     await populateManualAttendanceEmployees();
-    const curDate = document.getElementById('dailyDateInput')?.value || new Date().toISOString().split('T')[0];
+    const curDate = document.getElementById('dailyDateInput')?.value || '2026-08-18';
     document.getElementById('manualAttDate').value = curDate;
     document.getElementById('manualAttStatus').value = 'Present';
     document.getElementById('manualAttIn').value = '09:00';
@@ -242,7 +334,7 @@ async function openEditDailyAttendance(empId, empName, dateStr, status, firstIn,
 
 function handleManualStatusChange(val) {
     const timeRow = document.getElementById('manualAttTimesRow');
-    if (val === 'Absent' || val === 'Weekly Off' || val === 'Unpaid Leave') {
+    if (val === 'Absent' || val === 'Weekly Off' || val === 'Unpaid Leave' || val === 'Paid Leave') {
         timeRow.style.display = 'none';
     } else {
         timeRow.style.display = 'grid';
@@ -253,14 +345,77 @@ function handleManualStatusChange(val) {
 // 3. Monthly Timesheet Matrix
 // -------------------------------------------------------------
 async function loadTimesheetMatrix() {
-    const month = document.getElementById('timesheetMonthInput').value;
+    const month = document.getElementById('timesheetMonthInput').value || '2026-08';
     try {
-        const res = await fetch(`/api/attendance/monthly?month=${month}`);
-        const data = await res.json();
-        renderMatrix(month, data.matrix || []);
+        let matrix = [];
+        if (isLocalHost) {
+            try {
+                const res = await fetch(`/api/attendance/monthly?month=${month}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    matrix = data.matrix || [];
+                } else {
+                    matrix = await fetchMatrixFromSupabase(month);
+                }
+            } catch (err) {
+                matrix = await fetchMatrixFromSupabase(month);
+            }
+        } else {
+            matrix = await fetchMatrixFromSupabase(month);
+        }
+        renderMatrix(month, matrix);
     } catch (e) {
-        console.error(e);
+        console.error('loadTimesheetMatrix error:', e);
     }
+}
+
+async function fetchMatrixFromSupabase(month) {
+    const emps = await querySupabase('employees?select=*&is_active=eq.1&order=id.asc');
+    const atts = await querySupabase(`daily_attendance?select=*&date=gte.${month}-01&date=lte.${month}-31&order=date.asc`);
+
+    const empMap = {};
+    (emps || []).forEach(e => {
+        empMap[e.id] = {
+            id: e.id,
+            name: e.name,
+            biometric_id: e.biometric_id,
+            department: e.department || 'Multani Shop',
+            days: {},
+            summary: { present: 0, late: 0, absent: 0, leave: 0, half_day: 0, ot_hours: 0.0 }
+        };
+    });
+
+    (atts || []).forEach(r => {
+        const eid = r.employee_id;
+        if (empMap[eid] && r.date) {
+            const dayNum = r.date.split('-')[2];
+            const st = r.status || 'Absent';
+            const ot = parseFloat(r.overtime_hours || 0.0);
+
+            empMap[eid].days[dayNum] = {
+                status: st,
+                hours: r.total_hours,
+                ot: ot,
+                late: r.late_minutes
+            };
+
+            if (st === 'Present' || st === 'Holiday Present') {
+                empMap[eid].summary.present += 1;
+            } else if (st === 'Late') {
+                empMap[eid].summary.present += 1;
+                empMap[eid].summary.late += 1;
+            } else if (st === 'Half Day') {
+                empMap[eid].summary.half_day += 1;
+            } else if (st.includes('Leave')) {
+                empMap[eid].summary.leave += 1;
+            } else if (st === 'Absent') {
+                empMap[eid].summary.absent += 1;
+            }
+            empMap[eid].summary.ot_hours += ot;
+        }
+    });
+
+    return Object.values(empMap);
 }
 
 function renderMatrix(month, matrix) {
@@ -297,13 +452,14 @@ function renderMatrix(month, matrix) {
             if (!dayData) {
                 cells += `<td class="text-muted">-</td>`;
             } else {
-                const st = dayData.status;
+                const st = dayData.status || '';
                 let badge = '-';
                 if (st.includes('Present')) badge = `<span class="badge badge-success">P</span>`;
                 else if (st === 'Late') badge = `<span class="badge badge-warning">L</span>`;
                 else if (st === 'Half Day') badge = `<span class="badge badge-info">HD</span>`;
                 else if (st === 'Absent') badge = `<span class="badge badge-danger">A</span>`;
                 else if (st === 'Weekly Off') badge = `<span class="badge badge-secondary">OFF</span>`;
+                else if (st.includes('Leave')) badge = `<span class="badge badge-warning">LV</span>`;
                 cells += `<td>${badge}</td>`;
             }
         }
@@ -321,29 +477,143 @@ function renderMatrix(month, matrix) {
 // 4. Payroll & Payslip Module
 // -------------------------------------------------------------
 async function loadPayroll() {
-    const month = document.getElementById('payrollMonthInput').value;
+    const month = document.getElementById('payrollMonthInput').value || '2026-08';
     try {
-        const res = await fetch(`/api/payroll/payslips?month=${month}`);
-        const payslips = await res.json();
+        let payslips = [];
+        if (isLocalHost) {
+            try {
+                const res = await fetch(`/api/payroll/payslips?month=${month}`);
+                if (res.ok) {
+                    payslips = await res.json();
+                } else {
+                    payslips = await fetchPayrollFromSupabase(month);
+                }
+            } catch (err) {
+                payslips = await fetchPayrollFromSupabase(month);
+            }
+        } else {
+            payslips = await fetchPayrollFromSupabase(month);
+        }
         renderPayrollTable(month, payslips);
     } catch (e) {
-        console.error(e);
+        console.error('loadPayroll error:', e);
     }
 }
 
+async function fetchPayrollFromSupabase(month) {
+    const slips = await querySupabase(`payslips?select=*,employees(name,biometric_id,department,designation,salary_type)&month=eq.${month}&order=employee_id.asc`);
+    return (slips || []).map(p => ({
+        ...p,
+        employee_name: p.employees ? p.employees.name : `Staff #${p.employee_id}`,
+        biometric_id: p.employees ? p.employees.biometric_id : p.employee_id,
+        department: p.employees ? p.employees.department : 'Multani Shop',
+        designation: p.employees ? p.employees.designation : 'Staff',
+        breakdown: p.breakdown_json ? JSON.parse(p.breakdown_json) : {}
+    }));
+}
+
 async function calculatePayrollAction() {
-    const month = document.getElementById('payrollMonthInput').value;
+    const month = document.getElementById('payrollMonthInput').value || '2026-08';
     showToast(`Calculating payroll for ${month}...`, 'info');
+
+    if (isLocalHost) {
+        try {
+            const res = await fetch(`/api/payroll/generate?month=${month}`, { method: 'POST' });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Payroll calculated for ${data.total_employees} staff!`, 'success');
+                    loadPayroll();
+                    loadDashboard();
+                    return;
+                }
+            }
+        } catch (e) {}
+    }
+
+    // Direct Supabase calculation
     try {
-        const res = await fetch(`/api/payroll/generate?month=${month}`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'success') {
-            showToast(`Payroll generated for ${data.total_employees} staff members!`, 'success');
-            loadPayroll();
-            loadDashboard();
+        const emps = await querySupabase('employees?select=*&is_active=eq.1');
+        const atts = await querySupabase(`daily_attendance?select=*&date=gte.${month}-01&date=lte.${month}-31`);
+
+        const attByEmp = {};
+        (atts || []).forEach(a => {
+            if (!attByEmp[a.employee_id]) attByEmp[a.employee_id] = [];
+            attByEmp[a.employee_id].push(a);
+        });
+
+        for (const emp of emps) {
+            const empAtts = attByEmp[emp.id] || [];
+            let presDays = 0, absDays = 0, lateDays = 0, leaveDays = 0, otHours = 0;
+
+            empAtts.forEach(a => {
+                const st = a.status || 'Absent';
+                if (st === 'Present' || st === 'Holiday Present') presDays += 1;
+                else if (st === 'Late') { presDays += 1; lateDays += 1; }
+                else if (st === 'Half Day') { presDays += 0.5; absDays += 0.5; }
+                else if (st === 'Paid Leave') presDays += 1;
+                else if (st === 'Absent' || st === 'Unpaid Leave') absDays += 1;
+                otHours += parseFloat(a.overtime_hours || 0);
+            });
+
+            const basic = parseFloat(emp.basic_salary) || 30000;
+            const allowances = (parseFloat(emp.housing_allowance) || 0) + (parseFloat(emp.transport_allowance) || 0);
+            const dailyRate = Math.round((basic / 26.0) * 100) / 100;
+            const hourlyRate = Math.round((dailyRate / 8.0) * 100) / 100;
+            const otPay = Math.round(otHours * hourlyRate * 1.5);
+            const absDed = Math.round(absDays * dailyRate);
+            const lateDed = Math.round(lateDays * (dailyRate * 0.05)); // 5% of daily rate
+            const gross = basic + allowances + otPay;
+            const totalDed = absDed + lateDed;
+            const net = Math.max(0, gross - totalDed);
+
+            const slipPayload = {
+                employee_id: emp.id,
+                month: month,
+                basic_salary: basic,
+                housing_allowance: parseFloat(emp.housing_allowance) || 0,
+                transport_allowance: parseFloat(emp.transport_allowance) || 0,
+                medical_allowance: 0,
+                other_allowance: 0,
+                overtime_hours: otHours,
+                overtime_pay: otPay,
+                bonus: 0,
+                gross_salary: gross,
+                total_working_days: 26,
+                total_present_days: presDays,
+                total_absent_days: absDays,
+                total_late_days: lateDays,
+                total_leave_days: leaveDays,
+                total_holiday_days: 0,
+                absent_deduction: absDed,
+                late_deduction: lateDed,
+                tax_deduction: 0,
+                other_deduction: 0,
+                total_deductions: totalDed,
+                net_salary: net,
+                payment_status: 'Unpaid',
+                payment_method: 'Cash',
+                breakdown_json: JSON.stringify({
+                    daily_rate: dailyRate,
+                    hourly_rate: hourlyRate,
+                    ot_hours: otHours,
+                    late_days: lateDays,
+                    absent_days: absDays
+                })
+            };
+
+            await querySupabase('payslips?on_conflict=employee_id,month', {
+                method: 'POST',
+                headers: { 'Prefer': 'resolution=merge-duplicates' },
+                body: JSON.stringify(slipPayload)
+            });
         }
-    } catch (e) {
-        showToast('Calculation error: ' + e.message, 'error');
+
+        showToast(`Payroll calculated and synced to Supabase for ${emps.length} staff!`, 'success');
+        loadPayroll();
+        loadDashboard();
+    } catch (err) {
+        showToast('Calculation error: ' + err.message, 'error');
     }
 }
 
@@ -360,11 +630,11 @@ function renderPayrollTable(month, payslips) {
     let sumGross = 0, sumDeductions = 0, sumNet = 0;
 
     tbody.innerHTML = payslips.map(p => {
-        sumGross += p.gross_salary;
-        sumDeductions += p.total_deductions;
-        sumNet += p.net_salary;
+        sumGross += (parseFloat(p.gross_salary) || 0);
+        sumDeductions += (parseFloat(p.total_deductions) || 0);
+        sumNet += (parseFloat(p.net_salary) || 0);
 
-        const allowances = (p.housing_allowance || 0) + (p.transport_allowance || 0);
+        const allowances = (parseFloat(p.housing_allowance) || 0) + (parseFloat(p.transport_allowance) || 0);
 
         return `
             <tr>
@@ -406,11 +676,32 @@ function renderPayrollTable(month, payslips) {
 
 async function openPayslipModal(payslipId) {
     try {
-        const res = await fetch(`/api/payroll/payslip/${payslipId}`);
-        const p = await res.json();
+        let p = null;
+        if (isLocalHost) {
+            try {
+                const res = await fetch(`/api/payroll/payslip/${payslipId}`);
+                if (res.ok) p = await res.json();
+            } catch (err) {}
+        }
+
+        if (!p) {
+            const slips = await querySupabase(`payslips?select=*,employees(name,biometric_id,department,designation)&id=eq.${payslipId}`);
+            if (slips && slips.length > 0) {
+                const raw = slips[0];
+                p = {
+                    ...raw,
+                    employee_name: raw.employees ? raw.employees.name : 'Staff',
+                    biometric_id: raw.employees ? raw.employees.biometric_id : raw.employee_id,
+                    department: raw.employees ? raw.employees.department : 'Multani Shop',
+                    designation: raw.employees ? raw.employees.designation : 'Staff',
+                    company: cachedCompanySettings
+                };
+            }
+        }
+
         if (!p) return;
 
-        const comp = p.company || {};
+        const comp = p.company || cachedCompanySettings;
         document.getElementById('slipCompany').textContent = (comp.company_name || 'MULTANI TRADERS').toUpperCase();
         document.getElementById('slipCompanyAddress').textContent = comp.address || 'Multani Shop, Pakistan';
         document.getElementById('slipMonth').textContent = formatMonthName(p.month);
@@ -432,13 +723,13 @@ async function openPayslipModal(payslipId) {
         document.getElementById('slipHra').textContent = formatCurrency(p.housing_allowance);
         document.getElementById('slipTransport').textContent = formatCurrency(p.transport_allowance);
         document.getElementById('slipOtPay').textContent = formatCurrency(p.overtime_pay);
-        document.getElementById('slipBonus').textContent = formatCurrency(p.bonus);
+        document.getElementById('slipBonus').textContent = formatCurrency(p.bonus || 0);
         document.getElementById('slipGross').textContent = formatCurrency(p.gross_salary);
 
         // Deductions
         document.getElementById('slipDedAbs').textContent = formatCurrency(p.absent_deduction);
         document.getElementById('slipDedLate').textContent = formatCurrency(p.late_deduction);
-        document.getElementById('slipDedOther').textContent = formatCurrency(p.tax_deduction + (p.other_deduction || 0));
+        document.getElementById('slipDedOther').textContent = formatCurrency((p.tax_deduction || 0) + (p.other_deduction || 0));
         document.getElementById('slipTotalDed').textContent = formatCurrency(p.total_deductions);
 
         // Net Amount
@@ -456,51 +747,68 @@ async function openPayslipModal(payslipId) {
 // -------------------------------------------------------------
 async function loadStaff() {
     try {
-        const res = await fetch('/api/employees');
-        const staff = await res.json();
-        cachedStaff = staff;
-
-        const tbody = document.getElementById('staffBody');
-        const query = (document.getElementById('staffSearch')?.value || '').toLowerCase();
-
-        const filtered = staff.filter(s =>
-            (s.name || '').toLowerCase().includes(query) ||
-            (s.biometric_id || '').includes(query) ||
-            (s.department || '').toLowerCase().includes(query)
-        );
-
-        if (!filtered || filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding:20px;">No staff registered.</td></tr>`;
-            return;
+        let staff = [];
+        if (isLocalHost) {
+            try {
+                const res = await fetch('/api/employees');
+                if (res.ok) {
+                    staff = await res.json();
+                } else {
+                    staff = await querySupabase('employees?select=*&is_active=eq.1&order=id.asc');
+                }
+            } catch (err) {
+                staff = await querySupabase('employees?select=*&is_active=eq.1&order=id.asc');
+            }
+        } else {
+            staff = await querySupabase('employees?select=*&is_active=eq.1&order=id.asc');
         }
 
-        tbody.innerHTML = filtered.map(s => {
-            const allowances = (s.housing_allowance || 0) + (s.transport_allowance || 0);
-            const timingStr = `${s.start_time || '09:00'} - ${s.end_time || '18:00'}`;
-            return `
-                <tr>
-                    <td><b class="badge badge-secondary">#${s.biometric_id}</b></td>
-                    <td><strong>${escapeHtml(s.name)}</strong></td>
-                    <td>${escapeHtml(s.department || 'Multani Shop')}</td>
-                    <td>
-                        <span class="badge badge-info"><i class="fa-solid fa-clock"></i> ${timingStr}</span>
-                        <span class="text-muted" style="font-size:11px; margin-left:4px;">(${s.work_hours || 8} hrs)</span>
-                    </td>
-                    <td><span class="badge badge-secondary">${s.off_day || 'Sun'}</span></td>
-                    <td><b>${formatCurrency(s.basic_salary)}</b></td>
-                    <td>${formatCurrency(allowances)}</td>
-                    <td>
-                        <div style="display:flex; gap:6px;">
-                            <button class="btn btn-sm btn-outline" onclick="editStaff(${s.id})"><i class="fa-solid fa-pen"></i> Edit</button>
-                            <button class="btn btn-sm btn-outline text-danger" onclick="deleteStaff(${s.id})"><i class="fa-solid fa-trash"></i></button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+        cachedStaff = staff || [];
+        renderStaffTable(cachedStaff);
     } catch (e) {
-        console.error(e);
+        console.error('loadStaff error:', e);
     }
+}
+
+function renderStaffTable(staff) {
+    const tbody = document.getElementById('staffBody');
+    const query = (document.getElementById('staffSearch')?.value || '').toLowerCase();
+
+    const filtered = (staff || []).filter(s =>
+        (s.name || '').toLowerCase().includes(query) ||
+        (s.biometric_id || '').toString().includes(query) ||
+        (s.department || '').toLowerCase().includes(query)
+    );
+
+    if (!filtered || filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted" style="padding:20px;">No staff registered.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(s => {
+        const allowances = (parseFloat(s.housing_allowance) || 0) + (parseFloat(s.transport_allowance) || 0);
+        const timingStr = `${s.start_time || '09:00'} - ${s.end_time || '18:00'}`;
+        return `
+            <tr>
+                <td><b class="badge badge-secondary">#${s.biometric_id}</b></td>
+                <td><strong>${escapeHtml(s.name)}</strong></td>
+                <td>${escapeHtml(s.department || 'Multani Shop')}</td>
+                <td>
+                    <span class="badge badge-info"><i class="fa-solid fa-clock"></i> ${timingStr}</span>
+                    <span class="text-muted" style="font-size:11px; margin-left:4px;">(${s.work_hours || 8} hrs)</span>
+                </td>
+                <td><span class="badge badge-secondary">${s.off_day || 'Sun'}</span></td>
+                <td><b>${formatCurrency(s.basic_salary)}</b></td>
+                <td>${formatCurrency(allowances)}</td>
+                <td>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn btn-sm btn-outline" onclick="editStaff(${s.id})"><i class="fa-solid fa-pen"></i> Edit</button>
+                        <button class="btn btn-sm btn-outline text-danger" onclick="deleteStaff(${s.id})"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function applyShiftPreset(val) {
@@ -559,18 +867,24 @@ function editStaff(staffId) {
     document.getElementById('staffPresetSelect').value = '';
 
     document.getElementById('staffBasic').value = s.basic_salary;
-    document.getElementById('staffAllowances').value = (s.housing_allowance || 0) + (s.transport_allowance || 0);
+    document.getElementById('staffAllowances').value = (parseFloat(s.housing_allowance) || 0) + (parseFloat(s.transport_allowance) || 0);
     openModal('staffModal');
 }
 
 async function deleteStaff(staffId) {
     if (!confirm('Remove this staff member?')) return;
     try {
-        await fetch(`/api/employees/${staffId}`, { method: 'DELETE' });
+        if (isLocalHost) {
+            await fetch(`/api/employees/${staffId}`, { method: 'DELETE' }).catch(() => {});
+        }
+        await querySupabase(`employees?id=eq.${staffId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: 0 })
+        });
         showToast('Staff removed', 'success');
         loadStaff();
     } catch (e) {
-        showToast('Error removing staff', 'error');
+        showToast('Error removing staff: ' + e.message, 'error');
     }
 }
 
@@ -592,49 +906,32 @@ function updateLatePercentPreview() {
 
 async function loadSettings() {
     try {
-        const res = await fetch('/api/settings');
-        const s = await res.json();
-        if (s && s.company_name) {
-            currentCurrency = s.currency || 'PKR';
-            document.getElementById('brandCompanyName').textContent = s.company_name;
-            document.getElementById('setCompanyName').value = s.company_name;
-            document.getElementById('setCurrency').value = s.currency;
-            document.getElementById('setPhone').value = s.phone || '';
-            document.getElementById('setAddress').value = s.address || '';
-            document.getElementById('setWorkingDays').value = s.working_days_per_month || 26;
-            document.getElementById('setOtMultiplier').value = s.overtime_multiplier || 1.5;
-            document.getElementById('setLateGrace').value = s.late_grace_minutes || 15;
-            
-            const dedType = s.late_deduction_type || 'percentage';
-            document.getElementById('setLateDeductionType').value = dedType;
-            document.getElementById('setLatePenaltyPercent').value = s.late_penalty_percent !== undefined ? s.late_penalty_percent : 5.0;
-            document.getElementById('setLateFixedAmount').value = s.late_fixed_amount !== undefined ? s.late_fixed_amount : 100;
-            document.getElementById('setLateThreshold').value = s.late_threshold_count !== undefined ? s.late_threshold_count : 3;
-
-            toggleLateDeductionType(dedType);
+        if (isLocalHost) {
+            try {
+                const res = await fetch('/api/settings');
+                if (res.ok) {
+                    const s = await res.json();
+                    if (s && s.company_name) {
+                        cachedCompanySettings = s;
+                    }
+                }
+            } catch (err) {}
         }
+        currentCurrency = cachedCompanySettings.currency || 'PKR';
+        document.getElementById('brandCompanyName').textContent = cachedCompanySettings.company_name;
+        document.getElementById('setCompanyName').value = cachedCompanySettings.company_name;
+        document.getElementById('setCurrency').value = cachedCompanySettings.currency;
+        document.getElementById('setWorkingDays').value = cachedCompanySettings.working_days_per_month || 26;
+        document.getElementById('setOtMultiplier').value = cachedCompanySettings.overtime_multiplier || 1.5;
 
-        // Load Shift details
-        const shiftRes = await fetch('/api/shifts');
-        const shifts = await shiftRes.json();
-        if (shifts && shifts.length > 0) {
-            const sh = shifts[0];
-            document.getElementById('setShiftStart').value = sh.start_time || '09:00';
-            document.getElementById('setShiftEnd').value = sh.end_time || '18:00';
-            document.getElementById('setShiftHours').value = sh.full_day_hours || 8.0;
-            document.getElementById('setLateGrace').value = sh.grace_minutes || 15;
-        }
-
-        const devRes = await fetch('/api/devices');
-        const devs = await devRes.json();
-        if (devs && devs.length > 0) {
-            document.getElementById('setDevIp').value = devs[0].ip_address;
-            document.getElementById('setDevPort').value = devs[0].port;
-            document.getElementById('setDevUser').value = devs[0].username || 'admin';
-            document.getElementById('setDevPass').value = devs[0].password || '';
-        }
+        const dedType = cachedCompanySettings.late_deduction_type || 'percentage';
+        document.getElementById('setLateDeductionType').value = dedType;
+        document.getElementById('setLatePenaltyPercent').value = cachedCompanySettings.late_penalty_percent !== undefined ? cachedCompanySettings.late_penalty_percent : 5.0;
+        document.getElementById('setLateFixedAmount').value = cachedCompanySettings.late_fixed_amount !== undefined ? cachedCompanySettings.late_fixed_amount : 100;
+        document.getElementById('setLateThreshold').value = cachedCompanySettings.late_threshold_count !== undefined ? cachedCompanySettings.late_threshold_count : 3;
+        toggleLateDeductionType(dedType);
     } catch (e) {
-        console.error(e);
+        console.error('loadSettings error:', e);
     }
 }
 
@@ -642,8 +939,8 @@ async function saveSettingsAction() {
     const payload = {
         company_name: document.getElementById('setCompanyName').value.trim(),
         currency: document.getElementById('setCurrency').value.trim(),
-        phone: document.getElementById('setPhone').value.trim(),
-        address: document.getElementById('setAddress').value.trim(),
+        phone: document.getElementById('setPhone')?.value.trim() || '',
+        address: document.getElementById('setAddress')?.value.trim() || '',
         working_days_per_month: parseInt(document.getElementById('setWorkingDays').value) || 26,
         overtime_multiplier: parseFloat(document.getElementById('setOtMultiplier').value) || 1.5,
         late_grace_minutes: parseInt(document.getElementById('setLateGrace').value) || 15,
@@ -654,120 +951,85 @@ async function saveSettingsAction() {
         late_penalty_days: 1.0
     };
 
-    try {
-        await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+    cachedCompanySettings = { ...cachedCompanySettings, ...payload };
+    currentCurrency = payload.currency;
+    document.getElementById('brandCompanyName').textContent = payload.company_name;
 
-        // Save Shift Timings
-        const shiftPayload = {
-            name: 'Standard Shift',
-            start_time: document.getElementById('setShiftStart').value || '09:00',
-            end_time: document.getElementById('setShiftEnd').value || '18:00',
-            full_day_hours: parseFloat(document.getElementById('setShiftHours').value) || 8.0,
-            grace_minutes: parseInt(document.getElementById('setLateGrace').value) || 15
-        };
-
-        await fetch('/api/shifts/1', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(shiftPayload)
-        });
-
-        // Update Device
-        const devPayload = {
-            name: 'Main Fingerprint Machine',
-            ip_address: document.getElementById('setDevIp').value.trim(),
-            port: parseInt(document.getElementById('setDevPort').value) || 8080,
-            username: document.getElementById('setDevUser').value.trim(),
-            password: document.getElementById('setDevPass').value.trim(),
-            protocol: 'auto'
-        };
-
-        await fetch('/api/devices/1', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(devPayload)
-        });
-
-        showToast('Settings, Shift timings & Supabase saved successfully!', 'success');
-        loadSettings();
-    } catch (e) {
-        showToast('Error saving: ' + e.message, 'error');
+    if (isLocalHost) {
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } catch (e) {}
     }
+
+    showToast('Settings saved successfully!', 'success');
 }
 
 // -------------------------------------------------------------
-// Events & File Upload
+// Event Listeners
 // -------------------------------------------------------------
 function setupEvents() {
-    // Top Action Buttons
-    const fileInput = document.getElementById('universalFileInput');
-    document.getElementById('topUploadBtn')?.addEventListener('click', () => fileInput.click());
-    
-    fileInput?.addEventListener('change', async (e) => {
-        if (!e.target.files.length) return;
-        const file = e.target.files[0];
-        const formData = new FormData();
-        formData.append('file', file);
-        showToast('Importing attendance file...', 'info');
+    document.getElementById('settingsForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveSettingsAction();
+    });
+
+    document.getElementById('openAddManualAttBtn')?.addEventListener('click', openManualAttendanceModal);
+
+    document.getElementById('manualAttForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const empId = parseInt(document.getElementById('manualAttEmpSelect').value);
+        const dateStr = document.getElementById('manualAttDate').value;
+        const status = document.getElementById('manualAttStatus').value;
+        const notes = document.getElementById('manualAttNotes').value.trim();
+
+        let inTime = null, outTime = null, hrs = 0.0, lateMins = 0;
+        if (status === 'Present' || status === 'Late' || status === 'Half Day') {
+            inTime = document.getElementById('manualAttIn').value || '09:00';
+            outTime = document.getElementById('manualAttOut').value || '18:00';
+            hrs = status === 'Half Day' ? 4.0 : 8.0;
+        }
+
+        const payload = {
+            employee_id: empId,
+            date: dateStr,
+            first_in: inTime,
+            last_out: outTime,
+            all_punches: JSON.stringify([inTime, outTime].filter(Boolean)),
+            total_hours: hrs,
+            regular_hours: hrs,
+            overtime_hours: 0.0,
+            late_minutes: lateMins,
+            early_leave_minutes: 0,
+            status: status,
+            is_manual_override: 1,
+            notes: notes || 'Manual Override'
+        };
 
         try {
-            const res = await fetch('/api/import-csv', { method: 'POST', body: formData });
-            const data = await res.json();
-            showToast(`Imported ${data.imported || 0} attendance records!`, 'success');
+            if (isLocalHost) {
+                await fetch('/api/attendance/manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).catch(() => {});
+            }
+
+            await querySupabase('daily_attendance?on_conflict=employee_id,date', {
+                method: 'POST',
+                headers: { 'Prefer': 'resolution=merge-duplicates' },
+                body: JSON.stringify(payload)
+            });
+
+            showToast(`Attendance marked as ${status}!`, 'success');
+            closeModal('manualAttModal');
             loadDailyAttendance();
             loadDashboard();
         } catch (err) {
-            showToast('Import failed: ' + err.message, 'error');
-        }
-        fileInput.value = '';
-    });
-
-    document.getElementById('topSyncBtn')?.addEventListener('click', async () => {
-        showToast('Connecting to Fingerprint Machine...', 'info');
-        try {
-            const res = await fetch('/api/devices/1/sync', { method: 'POST' });
-            let data = null;
-            try {
-                data = await res.json();
-            } catch (jsonErr) {
-                const txt = await res.text().catch(() => '');
-                data = { success: false, message: txt || 'Device is currently unreachable or offline.' };
-            }
-            showToast(data.message || 'Sync completed', data.success ? 'success' : 'warning');
-            loadDailyAttendance();
-            loadDashboard();
-        } catch (e) {
-            showToast('Machine connection notice: ' + e.message, 'warning');
-        }
-    });
-
-    // Date filters
-    document.getElementById('dashDatePicker')?.addEventListener('change', loadDashboard);
-    document.getElementById('dashRefreshBtn')?.addEventListener('click', loadDashboard);
-    document.getElementById('dailyDateInput')?.addEventListener('change', loadDailyAttendance);
-    document.getElementById('attendanceSearch')?.addEventListener('input', loadDailyAttendance);
-    document.getElementById('staffSearch')?.addEventListener('input', loadStaff);
-    document.getElementById('loadTimesheetBtn')?.addEventListener('click', loadTimesheetMatrix);
-    document.getElementById('timesheetMonthInput')?.addEventListener('change', loadTimesheetMatrix);
-    document.getElementById('payrollMonthInput')?.addEventListener('change', loadPayroll);
-    document.getElementById('calculatePayrollBtn')?.addEventListener('click', calculatePayrollAction);
-    document.getElementById('saveAllSettingsBtn')?.addEventListener('click', saveSettingsAction);
-    document.getElementById('openAddStaffBtn')?.addEventListener('click', openAddStaff);
-    document.getElementById('printSlipBtn')?.addEventListener('click', () => window.print());
-
-    // Test Machine
-    document.getElementById('testMachineBtn')?.addEventListener('click', async () => {
-        showToast('Testing machine connection...', 'info');
-        try {
-            const res = await fetch('/api/devices/1/test', { method: 'POST' });
-            const data = await res.json();
-            showToast(data.message, data.success ? 'success' : 'error');
-        } catch (e) {
-            showToast('Test failed: ' + e.message, 'error');
+            showToast('Save failed: ' + err.message, 'error');
         }
     });
 
@@ -784,144 +1046,186 @@ function setupEvents() {
             department: document.getElementById('staffDept').value.trim() || 'Multani Shop',
             designation: 'Staff',
             phone: document.getElementById('staffPhone')?.value.trim() || '',
+            salary_type: 'Monthly',
             basic_salary: basic,
             housing_allowance: Math.round(allowances * 0.6),
             transport_allowance: Math.round(allowances * 0.4),
-            salary_type: 'Monthly',
-            shift_id: 1,
+            medical_allowance: 0.0,
+            other_allowance: 0.0,
             start_time: document.getElementById('staffStartTime').value || '09:00',
             end_time: document.getElementById('staffEndTime').value || '18:00',
-            work_hours: parseFloat(document.getElementById('staffWorkHours').value) || 8.0,
             grace_minutes: parseInt(document.getElementById('staffGraceMins').value) || 15,
-            off_day: document.getElementById('staffWeeklyOff').value || 'Sun'
+            work_hours: parseFloat(document.getElementById('staffWorkHours').value) || 8.0,
+            off_day: document.getElementById('staffWeeklyOff').value || 'Sun',
+            is_active: 1
         };
 
         try {
-            const url = staffId ? `/api/employees/${staffId}` : '/api/employees';
-            const method = staffId ? 'PUT' : 'POST';
-            await fetch(url, {
-                method: method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            showToast(staffId ? 'Staff updated!' : 'Staff member added!', 'success');
+            if (staffId) {
+                if (isLocalHost) {
+                    await fetch(`/api/employees/${staffId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).catch(() => {});
+                }
+                await querySupabase(`employees?id=eq.${staffId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(payload)
+                });
+                showToast('Staff profile updated!', 'success');
+            } else {
+                if (isLocalHost) {
+                    await fetch('/api/employees', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).catch(() => {});
+                }
+                await querySupabase('employees', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                showToast('New staff registered!', 'success');
+            }
             closeModal('staffModal');
             loadStaff();
-        } catch (err) {
-            showToast('Error: ' + err.message, 'error');
-        }
-    });
-
-    // Manual Attendance Modal Open
-    document.getElementById('openManualAttBtn')?.addEventListener('click', openManualAttendanceModal);
-
-    // Manual Attendance Form Submit
-    document.getElementById('manualAttForm')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const empId = parseInt(document.getElementById('manualAttEmpSelect').value);
-        const dateVal = document.getElementById('manualAttDate').value;
-        const statusVal = document.getElementById('manualAttStatus').value;
-        const inVal = document.getElementById('manualAttIn').value;
-        const outVal = document.getElementById('manualAttOut').value;
-        const notesVal = document.getElementById('manualAttNotes').value.trim();
-
-        const payload = {
-            employee_id: empId,
-            date: dateVal,
-            status: statusVal,
-            first_in: (statusVal === 'Absent' || statusVal === 'Weekly Off') ? null : inVal,
-            last_out: (statusVal === 'Absent' || statusVal === 'Weekly Off') ? null : outVal,
-            notes: notesVal
-        };
-
-        try {
-            const res = await fetch('/api/attendance/manual', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            showToast(data.message || 'Attendance updated successfully!', 'success');
-            closeModal('manualAttModal');
-            loadDailyAttendance();
             loadDashboard();
-            if (document.getElementById('timesheetMonthInput')?.value) {
-                loadTimesheetMatrix();
-            }
         } catch (err) {
-            showToast('Error saving attendance: ' + err.message, 'error');
+            showToast('Save error: ' + err.message, 'error');
         }
     });
+
+    document.getElementById('openAddStaffBtn')?.addEventListener('click', openAddStaff);
+    document.getElementById('printSlipBtn')?.addEventListener('click', () => window.print());
+
+    // Date filters
+    document.getElementById('dashDatePicker')?.addEventListener('change', loadDashboard);
+    document.getElementById('dashRefreshBtn')?.addEventListener('click', loadDashboard);
+    document.getElementById('dailyDateInput')?.addEventListener('change', loadDailyAttendance);
+    document.getElementById('dailyRefreshBtn')?.addEventListener('click', loadDailyAttendance);
+    document.getElementById('attendanceSearch')?.addEventListener('input', () => {
+        loadDailyAttendance();
+    });
+    document.getElementById('staffSearch')?.addEventListener('input', () => {
+        renderStaffTable(cachedStaff);
+    });
+    document.getElementById('timesheetMonthInput')?.addEventListener('change', loadTimesheetMatrix);
+    document.getElementById('timesheetRefreshBtn')?.addEventListener('click', loadTimesheetMatrix);
+    document.getElementById('payrollMonthInput')?.addEventListener('change', loadPayroll);
+    document.getElementById('calculatePayrollBtn')?.addEventListener('click', calculatePayrollAction);
 }
 
 // -------------------------------------------------------------
-// Helpers & Formatting
+// Helpers & Utilities
 // -------------------------------------------------------------
-function openModal(id) {
-    document.getElementById(id)?.classList.add('active');
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
 }
 
-function closeModal(id) {
-    document.getElementById(id)?.classList.remove('active');
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
 }
 
-function showToast(msg, type = 'info') {
+function showToast(message, type = 'info') {
     const box = document.getElementById('toastBox');
+    if (!box) return;
+
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = msg;
+    toast.className = `toast toast-${type}`;
+    const icon = type === 'success' ? 'circle-check' : (type === 'error' ? 'circle-xmark' : (type === 'warning' ? 'triangle-exclamation' : 'circle-info'));
+    toast.innerHTML = `<i class="fa-solid fa-${icon}"></i> <span>${escapeHtml(message)}</span>`;
     box.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
 }
 
-function getStatusBadge(st) {
-    if (!st) return '<span class="badge badge-secondary">--</span>';
-    if (st.includes('Present')) return '<span class="badge badge-success">Present</span>';
-    if (st.includes('Late')) return '<span class="badge badge-warning">Late</span>';
-    if (st === 'Half Day') return '<span class="badge badge-info">Half Day</span>';
-    if (st === 'Absent') return '<span class="badge badge-danger">Absent</span>';
-    if (st === 'Weekly Off') return '<span class="badge badge-secondary">Off</span>';
-    return `<span class="badge badge-secondary">${escapeHtml(st)}</span>`;
+function getStatusBadge(status) {
+    if (!status) return `<span class="badge badge-secondary">Pending</span>`;
+    if (status === 'Present' || status === 'Holiday Present') return `<span class="badge badge-success">Present</span>`;
+    if (status === 'Late') return `<span class="badge badge-warning">Late</span>`;
+    if (status === 'Half Day') return `<span class="badge badge-info">Half Day</span>`;
+    if (status === 'Paid Leave') return `<span class="badge badge-success">Paid Leave</span>`;
+    if (status === 'Unpaid Leave') return `<span class="badge badge-warning">Unpaid Leave</span>`;
+    if (status === 'Absent') return `<span class="badge badge-danger">Absent</span>`;
+    if (status === 'Weekly Off') return `<span class="badge badge-secondary">Weekly Off</span>`;
+    return `<span class="badge badge-info">${escapeHtml(status)}</span>`;
 }
 
-function formatCurrency(val) {
-    const num = Number(val) || 0;
-    return `${currentCurrency} ${num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+function formatCurrency(amt) {
+    const num = parseFloat(amt) || 0;
+    return `${currentCurrency} ${num.toLocaleString('en-US')}`;
 }
 
 function formatMonthName(monthStr) {
     if (!monthStr) return '';
-    try {
-        const [y, m] = monthStr.split('-');
-        const date = new Date(y, parseInt(m) - 1, 1);
-        return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
-    } catch (e) {
-        return monthStr;
-    }
+    const [year, month] = monthStr.split('-');
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const idx = parseInt(month, 10) - 1;
+    return `${months[idx] || ''} ${year}`;
 }
 
 function escapeHtml(str) {
     if (!str) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
-function numberToWords(num) {
-    const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
-    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-    num = Math.floor(num);
-    if (num === 0) return 'Zero';
-    if (num < 0) return 'Negative ' + numberToWords(-num);
-
-    function inWords(n) {
-        let str = '';
-        if (n >= 100000) { str += inWords(Math.floor(n / 100000)) + 'Lakh '; n %= 100000; }
-        if (n >= 1000) { str += inWords(Math.floor(n / 1000)) + 'Thousand '; n %= 1000; }
-        if (n >= 100) { str += inWords(Math.floor(n / 100)) + 'Hundred '; n %= 100; }
-        if (n > 0) {
-            if (n < 20) str += a[n];
-            else str += b[Math.floor(n / 10)] + ' ' + a[n % 10];
+function numberToWords(amount) {
+    const words = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    
+    if (amount === 0) return 'Zero';
+    
+    function convertLessThanOneThousand(n) {
+        let current = '';
+        if (n >= 100) {
+            current += words[Math.floor(n / 100)] + ' Hundred ';
+            n %= 100;
         }
-        return str;
+        if (n >= 20) {
+            current += tens[Math.floor(n / 10)] + ' ';
+            n %= 10;
+        }
+        if (n > 0) {
+            current += words[n] + ' ';
+        }
+        return current;
     }
-    return inWords(num).trim();
+
+    let result = '';
+    const n = Math.floor(amount);
+
+    if (Math.floor(n / 10000000) > 0) {
+        result += convertLessThanOneThousand(Math.floor(n / 10000000)) + 'Crore ';
+    }
+    const lakh = Math.floor((n % 10000000) / 100000);
+    if (lakh > 0) {
+        result += convertLessThanOneThousand(lakh) + 'Lakh ';
+    }
+    const thousand = Math.floor((n % 100000) / 1000);
+    if (thousand > 0) {
+        result += convertLessThanOneThousand(thousand) + 'Thousand ';
+    }
+    const remainder = n % 1000;
+    if (remainder > 0) {
+        result += convertLessThanOneThousand(remainder);
+    }
+
+    return result.trim();
 }
