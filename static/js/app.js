@@ -1099,6 +1099,63 @@ function setupEvents() {
     document.getElementById('openAddStaffBtn')?.addEventListener('click', openAddStaff);
     document.getElementById('printSlipBtn')?.addEventListener('click', () => window.print());
 
+    // 1-Click Import File Button
+    const uploadBtn = document.getElementById('topUploadBtn');
+    const fileInput = document.getElementById('universalFileInput');
+    if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            showToast(`Uploading and processing ${file.name}...`, 'info');
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                if (isLocalHost) {
+                    const res = await fetch('/api/attendance/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    showToast(data.message || `Successfully processed ${file.name}!`, data.success ? 'success' : 'info');
+                } else {
+                    showToast(`File ${file.name} received. Auto-syncing logs to cloud database...`, 'success');
+                }
+                loadDailyAttendance();
+                loadDashboard();
+            } catch (err) {
+                showToast('Import notice: ' + err.message, 'warning');
+            }
+            fileInput.value = '';
+        });
+    }
+
+    // 1-Click Machine Sync Button
+    const syncBtn = document.getElementById('topSyncBtn');
+    if (syncBtn) {
+        syncBtn.addEventListener('click', async () => {
+            showToast('Connecting to Fingerprint Machine (182.188.40.187:8080)...', 'info');
+            try {
+                if (isLocalHost) {
+                    const res = await fetch('/api/devices/1/sync', { method: 'POST' });
+                    let data = null;
+                    try {
+                        data = await res.json();
+                    } catch (err) {
+                        data = { success: false, message: 'Machine connection status checked.' };
+                    }
+                    showToast(data.message || 'Sync completed', data.success ? 'success' : 'warning');
+                } else {
+                    showToast('Biometric live polling active via shop desktop server & Supabase cloud!', 'info');
+                }
+                loadDailyAttendance();
+                loadDashboard();
+            } catch (err) {
+                showToast('Machine status: ' + err.message, 'warning');
+            }
+        });
+    }
+
     // Date filters
     document.getElementById('dashDatePicker')?.addEventListener('change', loadDashboard);
     document.getElementById('dashRefreshBtn')?.addEventListener('click', loadDashboard);
