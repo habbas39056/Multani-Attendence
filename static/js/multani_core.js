@@ -342,10 +342,28 @@ function handleManualStatusChange(val) {
 }
 
 // -------------------------------------------------------------
+// Helper: Get Exact Month Date Range (28, 29, 30, 31 days)
+// -------------------------------------------------------------
+function getMonthDateRange(monthStr) {
+    if (!monthStr || !monthStr.includes('-')) {
+        monthStr = '2026-08';
+    }
+    const [year, m] = monthStr.split('-').map(Number);
+    const daysInMonth = new Date(year, m, 0).getDate();
+    const lastDayStr = daysInMonth < 10 ? `0${daysInMonth}` : `${daysInMonth}`;
+    return {
+        startDate: `${monthStr}-01`,
+        endDate: `${monthStr}-${lastDayStr}`,
+        daysCount: daysInMonth
+    };
+}
+
+// -------------------------------------------------------------
 // 3. Monthly Timesheet Matrix
 // -------------------------------------------------------------
 async function loadTimesheetMatrix() {
-    const month = document.getElementById('timesheetMonthInput').value || '2026-08';
+    const monthInput = document.getElementById('timesheetMonthInput');
+    const month = monthInput ? monthInput.value : '2026-08';
     try {
         let matrix = [];
         if (isLocalHost) {
@@ -366,12 +384,14 @@ async function loadTimesheetMatrix() {
         renderMatrix(month, matrix);
     } catch (e) {
         console.error('loadTimesheetMatrix error:', e);
+        showToast('Timesheet load notice: ' + e.message, 'warning');
     }
 }
 
 async function fetchMatrixFromSupabase(month) {
+    const { startDate, endDate } = getMonthDateRange(month);
     const emps = await querySupabase('employees?select=*&is_active=eq.1&order=id.asc');
-    const atts = await querySupabase(`daily_attendance?select=*&date=gte.${month}-01&date=lte.${month}-31&order=date.asc`);
+    const atts = await querySupabase(`daily_attendance?select=*&date=gte.${startDate}&date=lte.${endDate}&order=date.asc`);
 
     const empMap = {};
     (emps || []).forEach(e => {
@@ -533,8 +553,9 @@ async function calculatePayrollAction() {
 
     // Direct Supabase calculation
     try {
+        const { startDate, endDate } = getMonthDateRange(month);
         const emps = await querySupabase('employees?select=*&is_active=eq.1');
-        const atts = await querySupabase(`daily_attendance?select=*&date=gte.${month}-01&date=lte.${month}-31`);
+        const atts = await querySupabase(`daily_attendance?select=*&date=gte.${startDate}&date=lte.${endDate}`);
 
         const attByEmp = {};
         (atts || []).forEach(a => {
@@ -1156,11 +1177,12 @@ function setupEvents() {
         });
     }
 
-    // Date filters
+    // Date filters & Action triggers
     document.getElementById('dashDatePicker')?.addEventListener('change', loadDashboard);
     document.getElementById('dashRefreshBtn')?.addEventListener('click', loadDashboard);
     document.getElementById('dailyDateInput')?.addEventListener('change', loadDailyAttendance);
     document.getElementById('dailyRefreshBtn')?.addEventListener('click', loadDailyAttendance);
+    document.getElementById('dailyRecalcBtn')?.addEventListener('click', loadDailyAttendance);
     document.getElementById('attendanceSearch')?.addEventListener('input', () => {
         loadDailyAttendance();
     });
@@ -1168,6 +1190,8 @@ function setupEvents() {
         renderStaffTable(cachedStaff);
     });
     document.getElementById('timesheetMonthInput')?.addEventListener('change', loadTimesheetMatrix);
+    document.getElementById('timesheetMonthInput')?.addEventListener('input', loadTimesheetMatrix);
+    document.getElementById('loadTimesheetBtn')?.addEventListener('click', loadTimesheetMatrix);
     document.getElementById('timesheetRefreshBtn')?.addEventListener('click', loadTimesheetMatrix);
     document.getElementById('payrollMonthInput')?.addEventListener('change', loadPayroll);
     document.getElementById('calculatePayrollBtn')?.addEventListener('click', calculatePayrollAction);

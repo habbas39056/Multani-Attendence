@@ -224,8 +224,8 @@
                         <p>Complete 31-day visual attendance sheet showing present, late, absent, and weekend days</p>
                     </div>
                     <div class="row-actions">
-                        <input type="month" id="timesheetMonthInput" class="form-input" value="2026-08">
-                        <button class="btn btn-primary" id="loadTimesheetBtn"><i class="fa-solid fa-filter"></i> View Month</button>
+                        <input type="month" id="timesheetMonthInput" class="form-input" value="2026-08" onchange="loadTimesheetMatrix()">
+                        <button class="btn btn-primary" id="loadTimesheetBtn" onclick="loadTimesheetMatrix()"><i class="fa-solid fa-filter"></i> View Month</button>
                     </div>
                 </div>
 
