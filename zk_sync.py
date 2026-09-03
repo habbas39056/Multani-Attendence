@@ -20,6 +20,7 @@ from requests.auth import HTTPDigestAuth, HTTPBasicAuth
 
 from database import get_db_connection
 from attendance_engine import process_attendance_for_date
+from supabase_manager import supabase_manager
 
 class BiometricSyncManager:
     _instance = None
@@ -252,6 +253,11 @@ class BiometricSyncManager:
                 "success",
                 f"Device #{device_id}" if device_id else "Live Sync"
             )
+            # Async push to Supabase Cloud
+            try:
+                threading.Thread(target=supabase_manager.sync_local_to_supabase, daemon=True).start()
+            except Exception:
+                pass
 
         return inserted
 
