@@ -120,18 +120,32 @@ function switchTab(tabId) {
 }
 
 function setDefaultDates() {
-    const defaultMonth = '2026-08';
-    document.getElementById('dashDatePicker').value = '2026-08-18';
-    document.getElementById('dailyDateInput').value = '2026-08-18';
-    document.getElementById('timesheetMonthInput').value = defaultMonth;
-    document.getElementById('payrollMonthInput').value = defaultMonth;
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+    const curMonthStr = `${yyyy}-${mm}`;
+
+    const dashDateEl = document.getElementById('dashDatePicker');
+    if (dashDateEl) dashDateEl.value = todayStr;
+
+    const dailyDateEl = document.getElementById('dailyDateInput');
+    if (dailyDateEl) dailyDateEl.value = todayStr;
+
+    const timesheetMonthEl = document.getElementById('timesheetMonthInput');
+    if (timesheetMonthEl) timesheetMonthEl.value = curMonthStr;
+
+    const payrollMonthEl = document.getElementById('payrollMonthInput');
+    if (payrollMonthEl) payrollMonthEl.value = curMonthStr;
 }
 
 // -------------------------------------------------------------
 // 1. Dashboard Module
 // -------------------------------------------------------------
 async function loadDashboard() {
-    const dateVal = document.getElementById('dashDatePicker').value || '2026-08-18';
+    const dashDateEl = document.getElementById('dashDatePicker');
+    const dateVal = (dashDateEl && dashDateEl.value) ? dashDateEl.value : new Date().toISOString().split('T')[0];
     try {
         let dailyRecords = [];
         if (isLocalHost) {
