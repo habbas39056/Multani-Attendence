@@ -219,7 +219,11 @@ async function fetchDashboardFromSupabase(dateVal) {
 function renderDashboardTable(records) {
     const tbody = document.getElementById('dashAttendanceBody');
     if (!records || records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted" style="padding:20px;">No attendance logs found for this date.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted" style="padding:25px;">
+            <i class="fa-solid fa-calendar-xmark text-secondary" style="font-size:24px; margin-bottom:8px; display:block;"></i>
+            No attendance punches recorded for this date yet.<br>
+            <span style="font-size:12px;">Switch date above to <b>2026-08-18</b> (or any date in August) to view past attendance logs.</span>
+        </td></tr>`;
         return;
     }
 
