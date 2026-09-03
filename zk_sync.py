@@ -211,12 +211,29 @@ class BiometricSyncManager:
             "message": f"Successfully pulled {total_fetched} logs ({total_saved} new punches saved across {len(dates_affected)} days)."
         }
 
-    def record_punch(self, biometric_id: str, punch_time: str, punch_type: str = "Auto", device_id: int = None, source: str = "biometric_sync"):
+    def record_punch(self, biometric_id: str, punch_time: str, punch_type: str = "Auto", device_id: int = None, source: str = "biometric_sync", name: str = None):
         """
-        Inserts a punch into raw_attendance_logs and triggers instant daily processing for that date.
+        Inserts a punch into raw_attendance_logs, auto-creates team member if not registered, and triggers instant daily processing.
         """
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        b_id = str(biometric_id).strip()
+        cursor.execute("SELECT id, name FROM employees WHERE biometric_id = ?", (b_id,))
+        emp_row = cursor.fetchone()
+        if not emp_row:
+            emp_display_name = name.strip() if name and name.strip() else f"Staff #{b_id}"
+            cursor.execute("""
+                INSERT INTO employees (
+                    biometric_id, name, department, designation, salary_type,
+                    basic_salary, housing_allowance, transport_allowance,
+                    start_time, end_time, grace_minutes, work_hours, off_day, is_active
+                ) VALUES (?, ?, 'Multani Shop', 'Staff', 'Monthly', 30000.0, 0.0, 0.0, '09:00', '18:00', 15, 8.0, 'Sun', 1)
+            """, (b_id, emp_display_name))
+            conn.commit()
+        elif name and name.strip() and emp_row["name"].startswith("Staff #"):
+            cursor.execute("UPDATE employees SET name = ? WHERE biometric_id = ?", (name.strip(), b_id))
+            conn.commit()
 
         try:
             if isinstance(punch_time, str):
@@ -240,7 +257,7 @@ class BiometricSyncManager:
         cursor.execute("""
             INSERT OR IGNORE INTO raw_attendance_logs (biometric_id, punch_time, punch_type, device_id, source)
             VALUES (?, ?, ?, ?, ?)
-        """, (str(biometric_id), clean_time_str, punch_type, device_id, source))
+        """, (b_id, clean_time_str, punch_type, device_id, source))
         
         inserted = cursor.rowcount > 0
         conn.commit()
@@ -249,7 +266,7 @@ class BiometricSyncManager:
         if inserted:
             process_attendance_for_date(date_str)
             self.add_feed_entry(
-                f"New Punch Log: Bio User #{biometric_id} at {clean_time_str}",
+                f"New Punch Log: Bio User #{b_id} at {clean_time_str}",
                 "success",
                 f"Device #{device_id}" if device_id else "Live Sync"
             )
@@ -413,6 +430,7 @@ class BiometricSyncManager:
                         break
                     
                     pid = chunk[1].strip()
+                    pname = chunk[2].strip() if len(chunk) > 2 and chunk[2].strip() and chunk[2].strip() != "-" else None
                     dt = chunk[6].strip()
                     cin = chunk[9].strip()
                     cout = chunk[10].strip()
@@ -422,16 +440,16 @@ class BiometricSyncManager:
                         if raw_punches and raw_punches != "-":
                             times = [t.strip() for t in raw_punches.split() if ":" in t]
                             for t in times:
-                                if self.record_punch(pid, f"{dt} {t}", "Auto", None, "xls_import"):
+                                if self.record_punch(pid, f"{dt} {t}", "Auto", None, "xls_import", name=pname):
                                     imported += 1
                                     dates_affected.add(dt)
                         elif cin != "-" or cout != "-":
                             if cin != "-":
-                                if self.record_punch(pid, f"{dt} {cin}", "Check-In", None, "xls_import"):
+                                if self.record_punch(pid, f"{dt} {cin}", "Check-In", None, "xls_import", name=pname):
                                     imported += 1
                                     dates_affected.add(dt)
                             if cout != "-" and cout != cin:
-                                if self.record_punch(pid, f"{dt} {cout}", "Check-Out", None, "xls_import"):
+                                if self.record_punch(pid, f"{dt} {cout}", "Check-Out", None, "xls_import", name=pname):
                                     imported += 1
                                     dates_affected.add(dt)
 

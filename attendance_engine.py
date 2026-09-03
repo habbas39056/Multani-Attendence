@@ -44,6 +44,25 @@ def process_attendance_for_date(target_date_str: str):
 
     day_name = target_dt.strftime("%a") # e.g. 'Mon', 'Sun'
 
+    # Auto-provision any biometric IDs found in raw logs that are not yet registered
+    cursor.execute("""
+        SELECT DISTINCT biometric_id 
+        FROM raw_attendance_logs 
+        WHERE DATE(punch_time) = ? AND biometric_id IS NOT NULL AND TRIM(biometric_id) != ''
+    """, (target_date_str,))
+    for row in cursor.fetchall():
+        b_id = str(row["biometric_id"]).strip()
+        cursor.execute("SELECT id FROM employees WHERE biometric_id = ?", (b_id,))
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO employees (
+                    biometric_id, name, department, designation, salary_type,
+                    basic_salary, housing_allowance, transport_allowance,
+                    start_time, end_time, grace_minutes, work_hours, off_day, is_active
+                ) VALUES (?, ?, 'Multani Shop', 'Staff', 'Monthly', 30000.0, 0.0, 0.0, '09:00', '18:00', 15, 8.0, 'Sun', 1)
+            """, (b_id, f"Staff #{b_id}"))
+            conn.commit()
+
     # Get active employees
     cursor.execute("""
         SELECT e.*, s.name as shift_name, s.start_time, s.end_time, 
