@@ -893,17 +893,35 @@ function editStaff(staffId) {
 }
 
 async function deleteStaff(staffId) {
-    if (!confirm('Remove this staff member?')) return;
+    const s = cachedStaff.find(e => e.id === staffId);
+    const staffName = s ? s.name : `Staff #${staffId}`;
+    const bioId = s ? s.biometric_id : null;
+
+    if (!confirm(`Are you sure you want to permanently remove "${staffName}"?\n\nAll daily attendance records, punches, and monthly payslips for this member will also be deleted.`)) {
+        return;
+    }
+
+    showToast(`Removing ${staffName} and all associated records...`, 'info');
     try {
         if (isLocalHost) {
             await fetch(`/api/employees/${staffId}`, { method: 'DELETE' }).catch(() => {});
         }
-        await querySupabase(`employees?id=eq.${staffId}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ is_active: 0 })
-        });
-        showToast('Staff removed', 'success');
-        loadStaff();
+
+        // Supabase Cloud Cascade Deletion
+        await querySupabase(`daily_attendance?employee_id=eq.${staffId}`, { method: 'DELETE' }).catch(() => {});
+        await querySupabase(`payslips?employee_id=eq.${staffId}`, { method: 'DELETE' }).catch(() => {});
+        await querySupabase(`leaves?employee_id=eq.${staffId}`, { method: 'DELETE' }).catch(() => {});
+        if (bioId) {
+            await querySupabase(`raw_attendance_logs?biometric_id=eq.${bioId}`, { method: 'DELETE' }).catch(() => {});
+        }
+        await querySupabase(`employees?id=eq.${staffId}`, { method: 'DELETE' }).catch(() => {});
+
+        showToast(`${staffName} and all associated data deleted successfully!`, 'success');
+        await loadStaff();
+        await loadDashboard();
+        await loadDailyAttendance();
+        await loadTimesheetMatrix();
+        await loadPayroll();
     } catch (e) {
         showToast('Error removing staff: ' + e.message, 'error');
     }

@@ -364,10 +364,27 @@ def update_employee(employee_id: int, emp: EmployeeModel):
 def delete_employee(employee_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE employees SET is_active = 0 WHERE id = ?", (employee_id,))
+    cursor.execute("SELECT biometric_id FROM employees WHERE id = ?", (employee_id,))
+    row = cursor.fetchone()
+    bio_id = row["biometric_id"] if row else None
+
+    # Cascade delete all related data
+    cursor.execute("DELETE FROM daily_attendance WHERE employee_id = ?", (employee_id,))
+    cursor.execute("DELETE FROM payslips WHERE employee_id = ?", (employee_id,))
+    cursor.execute("DELETE FROM leaves WHERE employee_id = ?", (employee_id,))
+    if bio_id:
+        cursor.execute("DELETE FROM raw_attendance_logs WHERE biometric_id = ?", (str(bio_id),))
+    cursor.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
     conn.commit()
     conn.close()
-    return {"status": "deactivated"}
+
+    # Cascade delete from Supabase Cloud
+    try:
+        supabase_manager.delete_employee_cascade(employee_id, bio_id)
+    except Exception:
+        pass
+
+    return {"status": "deleted", "message": "Employee and all associated records deleted successfully."}
 
 # -------------------------------------------------------------
 # Shifts API

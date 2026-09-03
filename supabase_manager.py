@@ -196,4 +196,22 @@ class SupabaseManager:
             conn.close()
             return {"success": False, "message": f"Sync failed: {str(e)}"}
 
+    def delete_employee_cascade(self, emp_id: int, bio_id: Optional[str] = None):
+        """Cascades deletion of employee and all related attendance/payroll records in Supabase Cloud."""
+        if not self.is_enabled:
+            return
+        headers = {
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}"
+        }
+        try:
+            requests.delete(f"{self.url}/rest/v1/daily_attendance?employee_id=eq.{emp_id}", headers=headers, timeout=5)
+            requests.delete(f"{self.url}/rest/v1/payslips?employee_id=eq.{emp_id}", headers=headers, timeout=5)
+            requests.delete(f"{self.url}/rest/v1/leaves?employee_id=eq.{emp_id}", headers=headers, timeout=5)
+            if bio_id:
+                requests.delete(f"{self.url}/rest/v1/raw_attendance_logs?biometric_id=eq.{bio_id}", headers=headers, timeout=5)
+            requests.delete(f"{self.url}/rest/v1/employees?id=eq.{emp_id}", headers=headers, timeout=5)
+        except Exception:
+            pass
+
 supabase_manager = SupabaseManager()
