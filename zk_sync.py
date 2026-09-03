@@ -51,7 +51,7 @@ class BiometricSyncManager:
             self.sync_logs_feed.pop()
 
     def test_connection(self, ip: str, port: int = 8080, username: str = "admin", password: str = "", timeout: int = 4):
-        """Tests connection to biometric device (supports TCP, HTTP, and Hikvision ISAPI)."""
+        """Tests connection to biometric device (supports TCP, HTTPS/HTTP, and Hikvision ISAPI)."""
         # 1. Test basic TCP reachability
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
@@ -71,33 +71,35 @@ class BiometricSyncManager:
                 "message": f"Could not reach {ip}:{port}: {str(e)}"
             }
 
-        # 2. Check if Hikvision ISAPI / HTTP Web service
-        url = f"http://{ip}:{port}/ISAPI/System/deviceInfo"
-        try:
-            auth = HTTPDigestAuth(username, password) if username and password else None
-            r = requests.get(url, auth=auth, timeout=3)
-            if r.status_code == 200:
-                # Extract device model or name
-                model = "Hikvision Terminal"
-                if "<model>" in r.text:
-                    model = r.text.split("<model>")[1].split("</model>")[0]
-                return {
-                    "success": True,
-                    "is_hikvision": True,
-                    "auth_ok": True,
-                    "message": f"Connected & Authenticated! Device: {model} (Latency: {elapsed}ms)",
-                    "latency_ms": elapsed
-                }
-            elif r.status_code == 401:
-                return {
-                    "success": True,
-                    "is_hikvision": True,
-                    "auth_ok": False,
-                    "message": f"Device is ONLINE ({ip}:{port}), but Authentication Failed (401). Please enter the device password in device settings to fetch logs.",
-                    "latency_ms": elapsed
-                }
-        except Exception:
-            pass
+        # 2. Check if Hikvision ISAPI (HTTPS first, then HTTP)
+        for protocol in ["https", "http"]:
+            url = f"{protocol}://{ip}:{port}/ISAPI/System/deviceInfo"
+            try:
+                auth = HTTPDigestAuth(username, password) if username and password else None
+                r = requests.get(url, auth=auth, verify=False, timeout=4)
+                if r.status_code == 200:
+                    model = "Hikvision Terminal"
+                    if "<model>" in r.text:
+                        model = r.text.split("<model>")[1].split("</model>")[0]
+                    return {
+                        "success": True,
+                        "is_hikvision": True,
+                        "auth_ok": True,
+                        "protocol": protocol,
+                        "message": f"Connected & Authenticated! Device: {model} (Latency: {elapsed}ms)",
+                        "latency_ms": elapsed
+                    }
+                elif r.status_code == 401:
+                    return {
+                        "success": True,
+                        "is_hikvision": True,
+                        "auth_ok": False,
+                        "protocol": protocol,
+                        "message": f"Device is ONLINE ({ip}:{port}), but Authentication Failed (401). Please check the device password.",
+                        "latency_ms": elapsed
+                    }
+            except Exception:
+                pass
 
         return {
             "success": True,
@@ -108,15 +110,11 @@ class BiometricSyncManager:
 
     def fetch_hikvision_punches(self, ip: str, port: int = 8080, username: str = "admin", password: str = "", start_date: str = None, end_date: str = None):
         """
-        Pulls attendance punch records from Hikvision terminal via ISAPI AcsEvent with pagination.
+        Pulls attendance punch records from Hikvision terminal via HTTPS/HTTP ISAPI AcsEvent with pagination.
         """
-        if not start_date:
-            start_date = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
-        if not end_date:
-            end_date = date.today().strftime("%Y-%m-%d")
+        import urllib3
+        urllib3.disable_warnings()
 
-        url = f"http://{ip}:{port}/ISAPI/AccessControl/AcsEvent?format=json"
-        
         position = 0
         max_batch = 100
         total_fetched = 0
@@ -125,36 +123,42 @@ class BiometricSyncManager:
 
         auth = HTTPDigestAuth(username, password)
 
+        # Detect protocol (HTTPS or HTTP)
+        protocol = "https"
+        try:
+            r_test = requests.get(f"https://{ip}:{port}/ISAPI/System/deviceInfo", auth=auth, verify=False, timeout=3)
+            if r_test.status_code not in [200, 401]:
+                protocol = "http"
+        except Exception:
+            protocol = "http"
+
+        url = f"{protocol}://{ip}:{port}/ISAPI/AccessControl/AcsEvent?format=json"
+
+        # Search for all events (major=5 is access control / door / authentication event)
         while True:
             payload = {
                 "AcsEventCond": {
-                    "searchID": "1",
+                    "searchID": "multani_sync",
                     "searchResultPosition": position,
                     "maxResults": max_batch,
-                    "major": 0,
-                    "minor": 0,
-                    "startTime": f"{start_date}T00:00:00+05:00",
-                    "endTime": f"{end_date}T23:59:59+05:00"
+                    "major": 5,
+                    "minor": 0
                 }
             }
 
             try:
-                r = requests.post(url, json=payload, auth=auth, timeout=8)
+                r = requests.post(url, json=payload, auth=auth, verify=False, timeout=10)
                 if r.status_code == 401:
-                    # Fallback to basic auth
                     auth = HTTPBasicAuth(username, password)
-                    r = requests.post(url, json=payload, auth=auth, timeout=8)
+                    r = requests.post(url, json=payload, auth=auth, verify=False, timeout=10)
 
                 if r.status_code == 401:
                     return {
                         "success": False,
-                        "message": "Authentication Failed (401). Please check the device password in Settings."
+                        "message": "Authentication Failed (401). Please check device password in Settings."
                     }
 
                 if r.status_code != 200:
-                    if total_fetched == 0:
-                        # Try standard ZK socket sync as fallback
-                        return self.sync_device(1)
                     break
 
                 try:
@@ -164,18 +168,20 @@ class BiometricSyncManager:
 
                 acs_event = data.get("AcsEvent", {})
                 events = acs_event.get("InfoList", [])
-                
+                total_matches = acs_event.get("totalMatches", 0)
+
                 if not events:
                     break
 
                 for ev in events:
                     total_fetched += 1
                     emp_no = ev.get("employeeNoString") or str(ev.get("cardNo") or "")
+                    emp_name = ev.get("name")
                     event_time_str = ev.get("time", "")
                     
                     if emp_no and event_time_str:
                         clean_time = event_time_str.split("+")[0].replace("T", " ")
-                        saved = self.record_punch(emp_no, clean_time, "Auto", None, "hikvision_isapi")
+                        saved = self.record_punch(emp_no, clean_time, "Auto", None, "hikvision_isapi", name=emp_name)
                         if saved:
                             total_saved += 1
                             try:
@@ -183,21 +189,26 @@ class BiometricSyncManager:
                             except Exception:
                                 pass
 
-                # Check if more records exist
-                resp_status = acs_event.get("responseStatusStrg", "")
-                if resp_status == "MORE" and len(events) == max_batch:
-                    position += len(events)
-                else:
+                position += len(events)
+                if position >= total_matches or len(events) == 0:
                     break
 
             except requests.exceptions.RequestException as e:
-                # Connection dropped or device offline
-                return {
-                    "success": False,
-                    "message": f"Biometric machine at {ip}:{port} is unreachable or offline right now. Please verify device power and internet connection."
-                }
+                break
             except Exception as e:
-                return {"success": False, "message": f"Sync notice: {str(e)}"}
+                break
+
+        # Reprocess attendance for all affected historical dates
+        for d in dates_affected:
+            process_attendance_for_date(d)
+
+        return {
+            "success": True,
+            "count": total_saved,
+            "total_events": total_fetched,
+            "dates_count": len(dates_affected),
+            "message": f"Successfully pulled {total_fetched} logs from machine ({total_saved} new punches saved across {len(dates_affected)} days)."
+        }
 
         # Reprocess attendance for all affected historical dates
         for d in dates_affected:
